@@ -139,6 +139,9 @@ interface ToggleRequest {
   profile: string;
   id: string;
 }
+interface WorkspaceHistoryRequest {
+  path: string;
+}
 /** Read-only state view the Web UI renders. */
 interface ManagerState {
   home: string;
@@ -146,6 +149,8 @@ interface ManagerState {
   workspaceRoot: string;
   /** Default workspace root used when config.workspaceRoot is empty. */
   workspaceDefault: string;
+  /** Recently used workspace roots persisted under `<home>/package-manager/runtime`. */
+  workspaceHistory: string[];
   restartNeeded: boolean;
   profiles: ProfileState[];
   entries: LedgerEntry[];
@@ -365,6 +370,8 @@ declare class PackageManager {
   constructor(options?: PackageManagerOptions);
   /** Resolved root for per-plugin workspaces (config or default). */
   workspaceRoot(): string;
+  /** Default workspace root used when config.workspaceRoot is empty. */
+  workspaceDefault(): string;
   /** `<workspaceRoot>/<profile>/<safe-id>` for one plugin install. */
   pluginWorkspaceDir(profile: string, id: string): string;
   /** Read-only view for the Web UI and CLI. */
@@ -379,6 +386,16 @@ declare class PackageManager {
   getConfig(): PackageManagerConfig;
   /** Validate and persist manager preferences. */
   setConfig(config: PackageManagerConfig): PackageManagerConfig;
+  /** Recently used workspace roots, newest first. */
+  workspaceHistory(): string[];
+  /** Record one workspace root in the local runtime history. */
+  recordWorkspaceHistory(path: string): string[];
+  /** Remove one workspace root from the local runtime history. */
+  forgetWorkspaceHistory(path: string): string[];
+  /** Clear the local workspace-root history. */
+  clearWorkspaceHistory(): string[];
+  /** Delete a disabled-entry memory record (no ledger entry exists to uninstall). */
+  forgetDisabled(request: ToggleRequest): DisabledEntry | undefined;
   /** Clone/pull the configured requirements repo, then restore its default deps.yaml. */
   syncConfigured(): Promise<RestoreResult>;
   /** Switch a plugin off: remember its request, then uninstall it. */
@@ -419,6 +436,26 @@ declare class PackageManagerService extends Service {
   readonly manager: PackageManager;
   readonly apiPrefix: string;
   constructor(ctx: Context, config: Config);
+  state(): ManagerState;
+  install(request: InstallRequest): Promise<InstallResult>;
+  uninstall(request: UninstallRequest): Promise<UninstallResult>;
+  restore(request: RestoreRequest): Promise<RestoreResult>;
+  sync(request: SyncRequest): Promise<RestoreResult>;
+  syncConfigured(): Promise<RestoreResult>;
+  adapterInit(request: AdapterInitRequest): Promise<AdapterInitResult>;
+  disable(request: ToggleRequest): Promise<UninstallResult>;
+  enable(request: ToggleRequest): Promise<InstallResult>;
+  forgetDisabled(request: ToggleRequest): DisabledEntry | undefined;
+  getConfig(): PackageManagerConfig;
+  setConfig(config: PackageManagerConfig): PackageManagerConfig;
+  clearRestartMarker(): void;
+  workspaceRoot(): string;
+  workspaceDefault(): string;
+  pluginWorkspaceDir(profile: string, id: string): string;
+  workspaceHistory(): string[];
+  recordWorkspaceHistory(path: string): string[];
+  forgetWorkspaceHistory(path: string): string[];
+  clearWorkspaceHistory(): string[];
   /** Create an AI session in one plugin workspace and dispatch installation. */
   dispatchAiInstall(request: AiInstallRequest): Promise<AiInstallResult>;
 }
@@ -429,4 +466,4 @@ declare class PackageManagerService extends Service {
  */
 declare function apply(ctx: Context, config: Config): void;
 //#endregion
-export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, type AiInstallRequest, type AiInstallResult, Config, type DisabledEntry, HarnessHost, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, LocalHost, type ManagerState, type OperationLog, PackageManager, type PackageManagerConfig, type PackageManagerHost, type PackageManagerOptions, type PackageManagerRuntime, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestoreRequest, type RestoreResult, type RuntimeMountResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type ToggleRequest, type UninstallRequest, type UninstallResult, apply, createHost, createPackageManager, idFromSource, name };
+export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, type AiInstallRequest, type AiInstallResult, Config, type DisabledEntry, HarnessHost, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, LocalHost, type ManagerState, type OperationLog, PackageManager, type PackageManagerConfig, type PackageManagerHost, type PackageManagerOptions, type PackageManagerRuntime, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestoreRequest, type RestoreResult, type RuntimeMountResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type ToggleRequest, type UninstallRequest, type UninstallResult, type WorkspaceHistoryRequest, apply, createHost, createPackageManager, idFromSource, name };

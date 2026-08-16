@@ -14,7 +14,10 @@ import { dispatchAiInstall } from './ai.ts'
 import { createHost } from './host.ts'
 import { PackageManager } from './manager.ts'
 import { CordisRuntime } from './runtime.ts'
-import type { AiInstallRequest, AiInstallResult } from './types.ts'
+import type {
+  AdapterInitRequest, AdapterInitResult, AiInstallRequest, AiInstallResult, DisabledEntry, InstallRequest, InstallResult,
+  ManagerState, PackageManagerConfig, RestoreRequest, RestoreResult, SyncRequest, ToggleRequest, UninstallRequest, UninstallResult,
+} from './types.ts'
 
 export { PackageManager, createPackageManager, idFromSource, type PackageManagerOptions } from './manager.ts'
 export { LocalHost, HarnessHost, createHost, type PackageManagerHost } from './host.ts'
@@ -62,6 +65,90 @@ export class PackageManagerService extends Service {
         ctx.logger('package-manager').warn('package-manager auto-sync failed: %s', messageOf(error))
       })
     }
+  }
+
+  // The Cordis service IS the public core API. The plain PackageManager below
+  // remains a headless implementation detail for CLI/tests, never the surface
+  // other Cordis plugins consume.
+
+  state(): ManagerState {
+    return this.manager.state()
+  }
+
+  install(request: InstallRequest): Promise<InstallResult> {
+    return this.manager.install(request)
+  }
+
+  uninstall(request: UninstallRequest): Promise<UninstallResult> {
+    return this.manager.uninstall(request)
+  }
+
+  restore(request: RestoreRequest): Promise<RestoreResult> {
+    return this.manager.restore(request)
+  }
+
+  sync(request: SyncRequest): Promise<RestoreResult> {
+    return this.manager.sync(request)
+  }
+
+  syncConfigured(): Promise<RestoreResult> {
+    return this.manager.syncConfigured()
+  }
+
+  adapterInit(request: AdapterInitRequest): Promise<AdapterInitResult> {
+    return this.manager.adapterInit(request)
+  }
+
+  disable(request: ToggleRequest): Promise<UninstallResult> {
+    return this.manager.disable(request)
+  }
+
+  enable(request: ToggleRequest): Promise<InstallResult> {
+    return this.manager.enable(request)
+  }
+
+  forgetDisabled(request: ToggleRequest): DisabledEntry | undefined {
+    return this.manager.forgetDisabled(request)
+  }
+
+  getConfig(): PackageManagerConfig {
+    return this.manager.getConfig()
+  }
+
+  setConfig(config: PackageManagerConfig): PackageManagerConfig {
+    return this.manager.setConfig(config)
+  }
+
+  clearRestartMarker(): void {
+    this.manager.clearRestartMarker()
+  }
+
+  workspaceRoot(): string {
+    return this.manager.workspaceRoot()
+  }
+
+  workspaceDefault(): string {
+    return this.manager.workspaceDefault()
+  }
+
+  pluginWorkspaceDir(profile: string, id: string): string {
+    return this.manager.pluginWorkspaceDir(profile, id)
+  }
+
+  workspaceHistory(): string[] {
+    return this.manager.workspaceHistory()
+  }
+
+  recordWorkspaceHistory(path: string): string[] {
+    return this.manager.recordWorkspaceHistory(path)
+  }
+
+  forgetWorkspaceHistory(path: string): string[] {
+    return this.manager.forgetWorkspaceHistory(path)
+  }
+
+  clearWorkspaceHistory(): string[] {
+    return this.manager.clearWorkspaceHistory()
   }
 
   /** Create an AI session in one plugin workspace and dispatch installation. */

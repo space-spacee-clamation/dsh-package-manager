@@ -25,7 +25,7 @@ describe('package-manager AI tools', () => {
     const manager = createPackageManager({ home })
     const registered: ToolDefinition[] = []
     const ctx = {
-      packageManager: { manager },
+      packageManager: { manager, install: (request: never) => manager.install(request), adapterInit: (request: never) => manager.adapterInit(request) },
       tools: { register: vi.fn((definition: ToolDefinition) => { registered.push(definition) }) },
     }
     apply(ctx as never)
@@ -38,7 +38,7 @@ describe('package-manager AI tools', () => {
     const manager = createPackageManager({ home })
     const registered: ToolDefinition[] = []
     const ctx = {
-      packageManager: { manager },
+      packageManager: { manager, install: (request: never) => manager.install(request), adapterInit: (request: never) => manager.adapterInit(request) },
       tools: { register: vi.fn((definition: ToolDefinition) => { registered.push(definition) }) },
     }
     apply(ctx as never)

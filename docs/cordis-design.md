@@ -47,11 +47,12 @@
 1. 把源码放进 `<workspace>/<id>/.venv`；
 2. 在 `.venv` 内 `pnpm install`；
 3. profile 增加 `link:` 依赖并 reconcile bundle；
-4. `import(packageName)` + `ctx.plugin(plugin)` 立即挂载 fiber。
+4. `ctx.loader.create({ name: packageName })` 把插件挂进 DSH 原生 loader tree；
+   没有 loader 的合成环境才回退 `import(packageName)` + `ctx.plugin()`。
 
 卸载顺序正好相反：
 
-1. dispose 插件 fiber（Cordis 自动 unwind 它注册的所有 effect）；
+1. 从 `ctx.loader` 移除插件 entry，由 Cordis 原生卸载路径 dispose fiber；
 2. LIFO 重放安装记录的 inverse；
 3. 移除 ledger 条目。
 

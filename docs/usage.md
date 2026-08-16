@@ -13,6 +13,17 @@
 
 两个入口共用同一页面。
 
+### 工作区页面
+
+默认进入“插件工作区”页：
+
+- 顶部路径栏显示当前 `workspaceRoot`，可从本地历史路径或默认路径切换；
+- 历史路径写入 `<home>/package-manager/runtime/workspace-history.json`，最多保留 20 条；
+- 中间插件列表为卡片布局，只有该区域滚动；开关立即启用/关闭，删除需二次确认；
+- 底部固定“链接输入栏 + 派发给 AI 安装”。
+
+“详细设置”页保留原有表单布局。
+
 ### 虚拟环境设置
 
 - `workspaceRoot` 空 = `<home>/package-manager/plugin-workspaces`；
@@ -144,7 +155,7 @@ manager.adapterInit({ source: 'github:owner/repo', id: 'repo', outDir: '.' })
 - `createPackageManager()`：纯 core，适合 CLI、脚本和测试；不会热挂载，会写
   restart marker。
 - `PackageManagerService`：在 Cordis Context 中创建 service，自动携带
-  `CordisRuntime`，因此 Web UI 和 AI 工具路径支持热插拔。
+  `CordisRuntime`；存在 `ctx.loader` 时走原生 loader/HMR，否则回退 `ctx.plugin`。
 - 导出：`PackageManager`、`createPackageManager`、`idFromSource`、
   `PackageManagerService`、`Config` 及全部 wire 类型。
 
@@ -205,4 +216,6 @@ modes:
 | `<home>/package-manager/ledger.json` | 已安装插件 ledger |
 | `<home>/package-manager/config.json` | 工作区根目录、包存储路径、远程 URL、自动同步开关 |
 | `<home>/package-manager/disabled.json` | 已关闭插件的原安装参数 |
-| `<home>/package-manager/cache` | clone / 下载 / 备份 scratch 目录 |
+| `<home>/package-manager/runtime/workspace-history.json` | 工作区根目录历史 |
+| `<home>/package-manager/runtime/packages` | 集中包存储：git mirror 与文件源快照 |
+| `<home>/package-manager/runtime/work` | 每次安装/卸载的 scratch 与回滚备份 |

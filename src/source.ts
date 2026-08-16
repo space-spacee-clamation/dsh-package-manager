@@ -1,13 +1,17 @@
 /**
  * Source resolution: detect what a source string means and materialize git and
  * filesystem sources into a stable per-install snapshot for probing and
- * custom adapters. npm names pass through to pnpm untouched.
+ * custom adapters. npm names pass through to pnpm untouched. Git and file
+ * source material is cached centrally under `<home>/package-manager/runtime/
+ * packages` so multiple plugin workspaces never trigger repeated remote
+ * clones.
  * @module @dsh-ext/dsh-package-manager/source
  */
 
 import { spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { cloneGitFromStore, snapshotFileSource } from './packageStore.ts'
 import { isAbsolutePath } from './paths.ts'
 import type { SourceKind, SpawnResult } from './types.ts'
 
@@ -52,40 +56,58 @@ export interface MaterializedSource {
   resolvedCommit: string
 }
 
+function isFullSha(value: string): boolean {
+  return /^[0-9a-f]{7,40}$/i.test(value)
+}
+
 /**
- * Materialize a git/file source into `workDir/source`. File sources are copied
- * so probing sees one stable snapshot; the pnpm dependency still points at the
- * user-supplied original path (matching `dsh plugin` semantics).
+ * Materialize a git/file source into `workDir/source`. Git clones go through
+ * the centralized package store; file sources are copied from a centralized
+ * snapshot so probing sees one stable snapshot while the pnpm dependency
+ * still points at the user-supplied original path (matching `dsh plugin`
+ * semantics).
  * @param workDir - per-install scratch directory.
  * @param source - verbatim source spec.
  * @param ref - requested branch/tag/commit (empty = remote default).
  * @param git - git runner seam.
+ * @param packageRoot - centralized package store root.
  */
-export async function materializeSource(workDir: string, source: string, ref: string, git: GitRunner): Promise<MaterializedSource> {
+export async function materializeSource(
+  workDir: string,
+  source: string,
+  ref: string,
+  git: GitRunner,
+  packageRoot: string,
+): Promise<MaterializedSource> {
   const kind = detectSourceKind(source)
   if (kind === 'npm') return { kind, dir: '', resolvedCommit: '' }
   mkdirSync(workDir, { recursive: true })
+  mkdirSync(packageRoot, { recursive: true })
   const dir = join(workDir, 'source')
+
   if (kind === 'git') {
     const github = parseGithubSpec(source)
     const url = github?.url ?? source.replace(/^git\+/, '')
-    const targetRef = github?.ref ?? ref
-    const args = ['clone', '--quiet']
-    if (targetRef !== '') args.push('--branch', targetRef)
-    // Default-branch installs do not need the full history. Full-SHA refs
-    // still need a complete clone (a shallow clone cannot resolve them).
-    if (!/^[0-9a-f]{7,40}$/i.test(targetRef)) args.push('--depth', '1')
-    args.push(url, dir)
-    const clone = await git(args, workDir)
-    if (clone.exitCode !== 0) throw new Error(`git clone failed (exit ${clone.exitCode}): ${clone.stderr || clone.stdout}`)
-    const rev = await git(['rev-parse', 'HEAD'], dir)
-    if (rev.exitCode !== 0) throw new Error(`git rev-parse failed (exit ${rev.exitCode}): ${rev.stderr || rev.stdout}`)
-    return { kind, dir, resolvedCommit: rev.stdout.trim() }
+    const targetRef = github !== undefined && github.ref !== '' ? github.ref : ref
+    if (isFullSha(targetRef)) {
+      // Mirror clones fetch advertised refs, not arbitrary SHAs. Full-SHA
+      // installs keep the previous complete direct clone.
+      const args = ['clone', '--quiet', url, dir]
+      const clone = await git(args, workDir)
+      if (clone.exitCode !== 0) throw new Error(`git clone failed (exit ${clone.exitCode}): ${clone.stderr || clone.stdout}`)
+      const rev = await git(['rev-parse', 'HEAD'], dir)
+      if (rev.exitCode !== 0) throw new Error(`git rev-parse failed (exit ${rev.exitCode}): ${rev.stderr || rev.stdout}`)
+      return { kind, dir, resolvedCommit: rev.stdout.trim() }
+    }
+    const materialized = await cloneGitFromStore(packageRoot, url, targetRef, git, dir)
+    return { kind, dir, resolvedCommit: materialized.resolvedCommit }
   }
+
   const resolved = resolve(source.replace(/^file:/, ''))
   if (!existsSync(resolved) || !statSync(resolved).isDirectory()) {
     throw new Error(`file source is not a directory: ${resolved}`)
   }
-  cpSync(resolved, dir, { recursive: true, force: true })
+  const snapshot = snapshotFileSource(packageRoot, resolved)
+  cpSync(snapshot, dir, { recursive: true, force: true })
   return { kind, dir, resolvedCommit: '' }
 }

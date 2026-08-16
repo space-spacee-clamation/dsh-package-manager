@@ -11,8 +11,10 @@ import { isAbsolute, join, resolve } from 'node:path'
 
 export const PROFILES_DIR = 'profiles'
 export const PM_DIR = 'package-manager'
-export const CACHE_DIR = 'cache'
+export const RUNTIME_DIR = 'runtime'
+export const PACKAGE_STORE_DIR = 'packages'
 export const PLUGIN_WORKSPACES_DIR = 'plugin-workspaces'
+export const WORKSPACE_HISTORY_FILENAME = 'workspace-history.json'
 export const LEDGER_FILENAME = 'ledger.json'
 
 /** Resolve the harness home, matching dsh-home-paths precedence. */
@@ -31,9 +33,24 @@ export function ledgerPath(home: string): string {
   return join(pmRoot(home), LEDGER_FILENAME)
 }
 
-/** Download/scratch cache root. */
-export function cacheRoot(home: string): string {
-  return join(pmRoot(home), CACHE_DIR)
+/** Package-manager runtime state root: history plus per-install scratch. */
+export function runtimeRoot(home: string): string {
+  return join(pmRoot(home), RUNTIME_DIR)
+}
+
+/** Per-install scratch root under runtime (rollback backups, work copies). */
+export function workRoot(home: string): string {
+  return join(runtimeRoot(home), 'work')
+}
+
+/** Centralized package source store under runtime. */
+export function packageStoreRoot(home: string): string {
+  return join(runtimeRoot(home), PACKAGE_STORE_DIR)
+}
+
+/** Recently used workspace roots, stored under runtime. */
+export function workspaceHistoryPath(home: string): string {
+  return join(runtimeRoot(home), WORKSPACE_HISTORY_FILENAME)
 }
 
 /** Default root for per-plugin workspaces when the user configures none. */

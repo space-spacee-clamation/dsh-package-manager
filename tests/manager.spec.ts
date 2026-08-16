@@ -109,6 +109,20 @@ modes:
     await manager.uninstall({ profile: 'web', id: 'fixture' })
   }, 120_000)
 
+  it('records switched workspace roots into the runtime history', () => {
+    const home = tempDir()
+    const manager = createPackageManager({ home })
+    const root = join(home, 'workspaces')
+
+    manager.setConfig({ storagePath: '', remoteUrl: '', autoSync: false, workspaceRoot: root })
+    expect(manager.workspaceHistory()).toEqual([root])
+    expect(manager.state().workspaceHistory).toEqual([root])
+
+    manager.setConfig({ storagePath: '', remoteUrl: '', autoSync: false, workspaceRoot: '' })
+    expect(manager.state().workspaceRoot).toBe(join(home, 'package-manager', 'plugin-workspaces'))
+    expect(manager.state().workspaceHistory).toEqual([root])
+  })
+
   it('clones and restores the configured requirements repo via syncConfigured', async () => {
     const home = tempDir()
     const fixture = makeBundleFixture(join(home, 'fixture'))

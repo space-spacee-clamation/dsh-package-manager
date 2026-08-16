@@ -9,10 +9,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type {} from '@deepseek-ai/dsh-host-webserver'
-import type { PackageManager } from './manager.ts'
 import type { PackageManagerService } from './index.ts'
 import type {
-  AdapterInitRequest, AiInstallRequest, InstallRequest, PackageManagerConfig, RestoreRequest, SyncRequest, ToggleRequest, UninstallRequest,
+  AdapterInitRequest, AiInstallRequest, InstallRequest, PackageManagerConfig, RestoreRequest, SyncRequest, ToggleRequest, UninstallRequest, WorkspaceHistoryRequest,
 } from './types.ts'
 
 export const name = 'package-manager-web'
@@ -25,7 +24,7 @@ const MAX_BODY_BYTES = 1024 * 1024
 export function apply(ctx: Context): void {
   const { manager, apiPrefix } = ctx.packageManager
   ctx.effect(
-    () => ctx.webServer.register({ kind: 'prefix', path: apiPrefix, handler: handle(manager, ctx.packageManager, apiPrefix) }),
+    () => ctx.webServer.register({ kind: 'prefix', path: apiPrefix, handler: handle(ctx.packageManager, apiPrefix) }),
     'package-manager-web: /pm-api route',
   )
 }
@@ -46,30 +45,50 @@ function subpath(pathname: string, prefix: string): string {
   return pathname
 }
 
-function handle(manager: PackageManager, service: PackageManagerService, apiPrefix: string): Handler {
+function handle(service: PackageManagerService, apiPrefix: string): Handler {
   return async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
     const path = subpath(url.pathname, apiPrefix)
     try {
-      if (req.method === 'GET' && path === '/state') return send(res, 200, { ok: true, value: manager.state() })
-      if (req.method === 'GET' && path === '/config') return send(res, 200, { ok: true, value: manager.getConfig() })
-      if (req.method === 'POST' && path === '/config') {
-        return dispatch(res, req, body => Promise.resolve(manager.setConfig(body as unknown as PackageManagerConfig)))
+      if (req.method === 'GET' && path === '/state') return send(res, 200, { ok: true, value: service.state() })
+      if (req.method === 'GET' && path === '/workspace-history') {
+        return send(res, 200, {
+          ok: true,
+          value: {
+            entries: service.workspaceHistory(),
+            current: service.workspaceRoot(),
+            default: service.workspaceDefault(),
+          },
+        })
       }
-      if (req.method === 'POST' && path === '/sync-configured') return dispatch(res, req, () => manager.syncConfigured())
-      if (req.method === 'POST' && path === '/disable') return dispatch(res, req, body => manager.disable(body as unknown as ToggleRequest))
-      if (req.method === 'POST' && path === '/enable') return dispatch(res, req, body => manager.enable(body as unknown as ToggleRequest))
+      if (req.method === 'GET' && path === '/config') return send(res, 200, { ok: true, value: service.getConfig() })
+      if (req.method === 'POST' && path === '/config') {
+        return dispatch(res, req, body => Promise.resolve(service.setConfig(body as unknown as PackageManagerConfig)))
+      }
+      if (req.method === 'POST' && path === '/sync-configured') return dispatch(res, req, () => service.syncConfigured())
+      if (req.method === 'POST' && path === '/disable') return dispatch(res, req, body => service.disable(body as unknown as ToggleRequest))
+      if (req.method === 'POST' && path === '/enable') return dispatch(res, req, body => service.enable(body as unknown as ToggleRequest))
       if (req.method === 'POST' && path === '/restart/clear') {
         assertCsrf(req)
-        manager.clearRestartMarker()
+        service.clearRestartMarker()
         return send(res, 200, { ok: true, value: null })
       }
-      if (req.method === 'POST' && path === '/install') return dispatch(res, req, body => manager.install(body as unknown as InstallRequest))
-      if (req.method === 'POST' && path === '/uninstall') return dispatch(res, req, body => manager.uninstall(body as unknown as UninstallRequest))
-      if (req.method === 'POST' && path === '/restore') return dispatch(res, req, body => manager.restore(body as unknown as RestoreRequest))
-      if (req.method === 'POST' && path === '/sync') return dispatch(res, req, body => manager.sync(body as unknown as SyncRequest))
+      if (req.method === 'POST' && path === '/install') return dispatch(res, req, body => service.install(body as unknown as InstallRequest))
+      if (req.method === 'POST' && path === '/uninstall') return dispatch(res, req, body => service.uninstall(body as unknown as UninstallRequest))
+      if (req.method === 'POST' && path === '/disabled/remove') return dispatch(res, req, body => Promise.resolve(service.forgetDisabled(body as unknown as ToggleRequest)))
+      if (req.method === 'POST' && path === '/workspace-history') {
+        return dispatch(res, req, body => Promise.resolve(service.recordWorkspaceHistory((body as unknown as WorkspaceHistoryRequest).path)))
+      }
+      if (req.method === 'POST' && path === '/workspace-history/remove') {
+        return dispatch(res, req, body => Promise.resolve(service.forgetWorkspaceHistory((body as unknown as WorkspaceHistoryRequest).path)))
+      }
+      if (req.method === 'POST' && path === '/workspace-history/clear') {
+        return dispatch(res, req, () => Promise.resolve(service.clearWorkspaceHistory()))
+      }
+      if (req.method === 'POST' && path === '/restore') return dispatch(res, req, body => service.restore(body as unknown as RestoreRequest))
+      if (req.method === 'POST' && path === '/sync') return dispatch(res, req, body => service.sync(body as unknown as SyncRequest))
       if (req.method === 'POST' && path === '/adapter-init') {
-        return dispatch(res, req, body => manager.adapterInit(body as unknown as AdapterInitRequest))
+        return dispatch(res, req, body => service.adapterInit(body as unknown as AdapterInitRequest))
       }
       if (req.method === 'POST' && path === '/ai-install') {
         return dispatch(res, req, body => service.dispatchAiInstall(body as unknown as AiInstallRequest))

@@ -80,7 +80,7 @@ export function apply(ctx: Context): void {
       }
       const adapter = typeof args.adapter === 'string' ? args.adapter : 'auto'
       const source = resolveSourceFor(cwd, manifest.source)
-      const result = await service.manager.install({
+      const result = await service.install({
         profile: manifest.profile,
         id: manifest.id,
         source,
@@ -139,7 +139,7 @@ export function apply(ctx: Context): void {
         throw new Error(`pm_scaffold only runs inside a package-manager plugin workspace (${cwd} has no package-manager.json)`)
       }
       const source = resolveSourceFor(cwd, manifest.source)
-      const result = await service.manager.adapterInit({
+      const result = await service.adapterInit({
         source,
         id: manifest.id,
         outDir: cwd,

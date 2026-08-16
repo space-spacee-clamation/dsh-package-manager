@@ -16,8 +16,8 @@
   `link:` 依赖。
 - **AI 安装**：只填一个链接，自动创建插件工作区和 AI 会话，会话自动出现在
   前端历史记录中。
-- **随时热插拔**：`dsh-bundle` 插件安装后立即通过 `ctx.plugin()` 挂载，卸载
-  时先 dispose fiber，再回放逆操作。
+- **随时热插拔**：`dsh-bundle` 插件安装后作为 `ctx.loader` 的原生 loader
+  entry 挂载，接入 DSH 自己的 HMR 生命周期；无 loader 时回退 `ctx.plugin()`。
 - **事务与回滚**：每个安装 step 记录显式 inverse，失败与卸载都按 LIFO 回放。
 - **requirements 复原**：`deps.yaml` 声明插件集合，按最小差集
   `install / keep / update / uninstall`。
@@ -82,7 +82,11 @@ pnpm install
 ```
 
 `workspaceRoot` 默认为 `<home>/package-manager/plugin-workspaces`，可在设置页
-修改或一键恢复默认。
+修改或一键恢复默认。设置页默认进入全屏工作区布局：顶部路径栏带本地历史，
+中间是插件卡片列表，底部固定链接输入栏与“派发给 AI 安装”。
+
+Git 与文件源会集中缓存到 `<home>/package-manager/runtime/packages`；同一个
+git 源只需远程 clone 一次，后续工作区从本地 mirror clone，避免重复克隆。
 
 ### 安装与卸载
 
@@ -93,13 +97,14 @@ materialize source
   -> probe dsh.bundle.patch
   -> 把源码放进 <workspace>/.venv 并安装依赖
   -> profile 增加 link: 依赖并 reconcile bundle
-  -> import(packageName) + ctx.plugin(package)   ← 立即热挂载
+  -> ctx.loader.create({ name: packageName })        ← 原生 HMR 生命周期
+  -> (无 loader 时回退 import + ctx.plugin)
 ```
 
 卸载顺序：
 
 ```text
-dispose Cordis fiber
+从 ctx.loader 移除插件 entry（或 dispose fallback fiber）
   -> LIFO 回放 ledger 中记录的 inverse step
   -> 移除 .venv / profile link / bundle entry
 ```

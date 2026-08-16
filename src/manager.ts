@@ -13,11 +13,12 @@ import { builtinInstallSteps, isGitSpec, probeBundleDir } from './adapters/built
 import { loadCustomAdapter, runCustomInstall, scaffoldCustomAdapter } from './adapters/custom.ts'
 import { getEntry, listEntries, loadLedger, removeEntry, saveLedger, setEntry } from './ledger.ts'
 import { createHost, type PackageManagerHost } from './host.ts'
-import { cacheRoot, defaultWorkspaceRoot, pmRoot, profileDir, resolveHome } from './paths.ts'
+import { defaultWorkspaceRoot, packageStoreRoot, pmRoot, profileDir, resolveHome, workRoot } from './paths.ts'
 import { pluginEnvDir, pluginWorkspaceDir } from './pluginWorkspace.ts'
 import { loadConfig, loadDisabled, removeDisabledEntry, saveConfig, saveDisabled, upsertDisabledEntry } from './config.ts'
 import { ensureProfile, listProfiles, readManifest } from './profile.ts'
 import { detectSourceKind, materializeSource, type GitRunner } from './source.ts'
+import { clearWorkspaceHistory, forgetWorkspaceHistory, loadWorkspaceHistory, recordWorkspaceHistory } from './runtimeStore.ts'
 import { parseRequirements, planRestore, resolveAdapterDir, fingerprint } from './spec.ts'
 import { StepExecutor, type CommandRunner, type PnpmRunner } from './steps.ts'
 import type {
@@ -64,6 +65,11 @@ export class PackageManager {
     return isAbsolute(configured) ? resolve(configured) : resolve(this.home, configured)
   }
 
+  /** Default workspace root used when config.workspaceRoot is empty. */
+  workspaceDefault(): string {
+    return defaultWorkspaceRoot(this.home)
+  }
+
   /** `<workspaceRoot>/<profile>/<safe-id>` for one plugin install. */
   pluginWorkspaceDir(profile: string, id: string): string {
     return pluginWorkspaceDir(this.workspaceRoot(), profile, id)
@@ -86,6 +92,7 @@ export class PackageManager {
       home: this.home,
       workspaceRoot: this.workspaceRoot(),
       workspaceDefault: defaultWorkspaceRoot(this.home),
+      workspaceHistory: loadWorkspaceHistory(this.home),
       restartNeeded: existsSync(this.restartMarker()),
       profiles,
       entries: listEntries(loadLedger(this.home)),
@@ -151,7 +158,7 @@ export class PackageManager {
 
     let records: StepRecord[] = []
     try {
-      const materialized = kind === 'npm' ? undefined : await materializeSource(workDir, source, ref, this.git)
+      const materialized = kind === 'npm' ? undefined : await materializeSource(workDir, source, ref, this.git, packageStoreRoot(this.home))
       const resolved = this.resolveAdapter(request.adapter, request.adapterDir ?? '', source, materialized?.dir ?? '')
       const packageName = resolved.packageName ?? (kind === 'npm' ? npmNameOf(source) : '')
       log('info', `adapter: ${resolved.kind}${resolved.reason === '' ? '' : ` (${resolved.reason})`}`)
@@ -371,7 +378,37 @@ export class PackageManager {
 
   /** Validate and persist manager preferences. */
   setConfig(config: PackageManagerConfig): PackageManagerConfig {
-    return saveConfig(this.home, config)
+    const previous = this.getConfig()
+    const saved = saveConfig(this.home, config)
+    if (saved.workspaceRoot.trim() !== '' && saved.workspaceRoot.trim() !== previous.workspaceRoot.trim()) {
+      recordWorkspaceHistory(this.home, this.workspaceRoot())
+    }
+    return saved
+  }
+
+  /** Recently used workspace roots, newest first. */
+  workspaceHistory(): string[] {
+    return loadWorkspaceHistory(this.home)
+  }
+
+  /** Record one workspace root in the local runtime history. */
+  recordWorkspaceHistory(path: string): string[] {
+    return recordWorkspaceHistory(this.home, path)
+  }
+
+  /** Remove one workspace root from the local runtime history. */
+  forgetWorkspaceHistory(path: string): string[] {
+    return forgetWorkspaceHistory(this.home, path)
+  }
+
+  /** Clear the local workspace-root history. */
+  clearWorkspaceHistory(): string[] {
+    return clearWorkspaceHistory(this.home)
+  }
+
+  /** Delete a disabled-entry memory record (no ledger entry exists to uninstall). */
+  forgetDisabled(request: ToggleRequest): DisabledEntry | undefined {
+    return removeDisabledEntry(this.home, request.profile, request.id)
   }
 
   /** Clone/pull the configured requirements repo, then restore its default deps.yaml. */
@@ -455,7 +492,7 @@ export class PackageManager {
     const outDir = resolve(request.outDir)
     mkdirSync(outDir, { recursive: true })
     const workDir = this.workDir('probe', request.id)
-    const materialized = await materializeSource(workDir, request.source, request.ref ?? '', this.git)
+    const materialized = await materializeSource(workDir, request.source, request.ref ?? '', this.git, packageStoreRoot(this.home))
     if (materialized.kind === 'npm') {
       log('info', `npm source ${request.source}: the dsh-bundle adapter will drive pnpm directly (no adapter file needed)`)
       this.writeDepsEntry(outDir, request, 'dsh-bundle', '')
@@ -561,7 +598,7 @@ export class PackageManager {
 
   private workDir(profile: string, id: string): string {
     const safe = id.replaceAll(/[^A-Za-z0-9._-]/g, '-')
-    return join(cacheRoot(this.home), 'work', `${profile}-${safe}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+    return join(workRoot(this.home), `${profile}-${safe}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
   }
 
   private restartMarker(): string {

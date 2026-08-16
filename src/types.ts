@@ -149,6 +149,10 @@ export interface ToggleRequest {
   id: string
 }
 
+export interface WorkspaceHistoryRequest {
+  path: string
+}
+
 /** Read-only state view the Web UI renders. */
 export interface ManagerState {
   home: string
@@ -156,6 +160,8 @@ export interface ManagerState {
   workspaceRoot: string
   /** Default workspace root used when config.workspaceRoot is empty. */
   workspaceDefault: string
+  /** Recently used workspace roots persisted under `<home>/package-manager/runtime`. */
+  workspaceHistory: string[]
   restartNeeded: boolean
   profiles: ProfileState[]
   entries: LedgerEntry[]

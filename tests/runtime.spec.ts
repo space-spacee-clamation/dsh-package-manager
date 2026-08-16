@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import Loader from '@deepseek-ai/cordis-plugin-loader'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { CordisRuntime } from '../src/runtime.ts'
 import type { LedgerEntry } from '../src/types.ts'
@@ -101,6 +103,43 @@ describe('CordisRuntime hot plug', () => {
     expect(events).toContain('profile-apply')
     await runtime.unmount(target)
     expect(events).toContain('profile-dispose')
+  })
+
+  it('mounts through the native ctx.loader tree when a Loader service exists', async () => {
+    const profileDir = tempDir()
+    const root = join(profileDir, 'node_modules', 'native-fixture')
+    mkdirSync(join(root, 'lib'), { recursive: true })
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'native-fixture', version: '1.0.0', type: 'module', main: 'lib/index.js' }))
+    writeFileSync(join(root, 'lib', 'index.js'), `
+      globalThis.__dshNativeHotEvents = []
+      export default {
+        name: 'native-fixture',
+        apply(ctx) {
+          globalThis.__dshNativeHotEvents.push('native-apply')
+          ctx.effect(() => {
+            globalThis.__dshNativeHotEvents.push('native-effect')
+            return () => { globalThis.__dshNativeHotEvents.push('native-dispose') }
+          }, 'native-fixture: effect')
+        },
+      }
+    `)
+    const ctx = new Context()
+    ctx.baseUrl = pathToFileURL(profileDir).href + '/'
+    await ctx.plugin(Loader)
+    const target = entry('native-fixture')
+    target.profileDir = profileDir
+    const runtime = new CordisRuntime(ctx)
+
+    const mounted = await runtime.mount(target)
+    expect(mounted.mounted).toBe(true)
+    const events = (globalThis as Record<string, unknown>).__dshNativeHotEvents as string[]
+    expect(events).toContain('native-apply')
+    expect([...ctx.loader.entries()].some(item => item.options.name.includes('native-fixture'))).toBe(true)
+
+    const unmounted = await runtime.unmount(target)
+    expect(unmounted.mounted).toBe(true)
+    expect(events).toContain('native-dispose')
+    expect([...ctx.loader.entries()].some(item => item.options.name.includes('native-fixture'))).toBe(false)
   })
 
   it('refuses non-bundle entries', async () => {

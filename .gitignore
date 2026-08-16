@@ -2,3 +2,6 @@ node_modules/
 *.tsbuildinfo
 coverage/
 .pnpm-store/
+
+# local runtime scratch (also lives under <DSH_HOME>/package-manager/runtime at runtime)
+runtime/
