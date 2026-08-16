@@ -127,6 +127,7 @@ dispose Cordis fiber
 | [docs/adapter-spec.md](docs/adapter-spec.md) | 自定义 adapter 的 step 词汇表、占位符、逆操作规则 |
 | [docs/requirements-spec.md](docs/requirements-spec.md) | `requirements/deps.yaml` 字段、路径解析与校验 |
 | [docs/cordis-design.md](docs/cordis-design.md) | 与 Cordis / DSH 论文相关工作的概念对应 |
+| [docs/host-adapter.md](docs/host-adapter.md) | pnpm / git / shell 宿主适配器与 coeffect 映射 |
 | [docs/development.md](docs/development.md) | 构建、测试与本地开发 |
 
 ## License

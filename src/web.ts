@@ -69,7 +69,7 @@ function handle(manager: PackageManager, service: PackageManagerService, apiPref
       if (req.method === 'POST' && path === '/restore') return dispatch(res, req, body => manager.restore(body as unknown as RestoreRequest))
       if (req.method === 'POST' && path === '/sync') return dispatch(res, req, body => manager.sync(body as unknown as SyncRequest))
       if (req.method === 'POST' && path === '/adapter-init') {
-        return dispatch(res, req, body => Promise.resolve(manager.adapterInit(body as unknown as AdapterInitRequest)))
+        return dispatch(res, req, body => manager.adapterInit(body as unknown as AdapterInitRequest))
       }
       if (req.method === 'POST' && path === '/ai-install') {
         return dispatch(res, req, body => service.dispatchAiInstall(body as unknown as AiInstallRequest))

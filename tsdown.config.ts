@@ -36,6 +36,7 @@ export default [
         '@deepseek-ai/dsh-agent',
         '@deepseek-ai/dsh-llm',
         '@deepseek-ai/dsh-session',
+        '@deepseek-ai/dsh-subprocess',
         '@deepseek-ai/dsh-tools',
         '@deepseek-ai/dsh-workspace',
       ],

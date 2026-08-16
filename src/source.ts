@@ -11,10 +11,10 @@ import { join, resolve } from 'node:path'
 import { isAbsolutePath } from './paths.ts'
 import type { SourceKind, SpawnResult } from './types.ts'
 
-export type GitRunner = (args: string[], cwd: string) => SpawnResult
+export type GitRunner = (args: string[], cwd: string) => Promise<SpawnResult>
 
 export function defaultGitRunner(): GitRunner {
-  return (args, cwd) => {
+  return async (args, cwd) => {
     const result = spawnSync('git', args, { cwd, encoding: 'utf8', shell: process.platform === 'win32', windowsHide: true })
     const status = result.status ?? 1
     const error = result.error
@@ -61,7 +61,7 @@ export interface MaterializedSource {
  * @param ref - requested branch/tag/commit (empty = remote default).
  * @param git - git runner seam.
  */
-export function materializeSource(workDir: string, source: string, ref: string, git: GitRunner): MaterializedSource {
+export async function materializeSource(workDir: string, source: string, ref: string, git: GitRunner): Promise<MaterializedSource> {
   const kind = detectSourceKind(source)
   if (kind === 'npm') return { kind, dir: '', resolvedCommit: '' }
   mkdirSync(workDir, { recursive: true })
@@ -76,9 +76,9 @@ export function materializeSource(workDir: string, source: string, ref: string, 
     // still need a complete clone (a shallow clone cannot resolve them).
     if (!/^[0-9a-f]{7,40}$/i.test(targetRef)) args.push('--depth', '1')
     args.push(url, dir)
-    const clone = git(args, workDir)
+    const clone = await git(args, workDir)
     if (clone.exitCode !== 0) throw new Error(`git clone failed (exit ${clone.exitCode}): ${clone.stderr || clone.stdout}`)
-    const rev = git(['rev-parse', 'HEAD'], dir)
+    const rev = await git(['rev-parse', 'HEAD'], dir)
     if (rev.exitCode !== 0) throw new Error(`git rev-parse failed (exit ${rev.exitCode}): ${rev.stderr || rev.stdout}`)
     return { kind, dir, resolvedCommit: rev.stdout.trim() }
   }

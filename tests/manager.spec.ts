@@ -183,11 +183,11 @@ verify:
 })
 
 describe('PackageManager adapterInit', () => {
-  it('detects dsh-bundle plugins and writes a deps.yaml entry without an adapter file', () => {
+  it('detects dsh-bundle plugins and writes a deps.yaml entry without an adapter file', async () => {
     const home = tempDir()
     const fixture = makeBundleFixture(join(home, 'fixture'))
     const out = join(home, 'requirements')
-    const result = createPackageManager({ home }).adapterInit({ source: fixture, id: 'fixture', outDir: out, profile: 'web' })
+    const result = await createPackageManager({ home }).adapterInit({ source: fixture, id: 'fixture', outDir: out, profile: 'web' })
     expect(result.adapter).toBe('dsh-bundle')
     expect(existsSync(join(out, 'requirements', 'deps.yaml'))).toBe(true)
     const text = readFileSync(join(out, 'requirements', 'deps.yaml'), 'utf8')
@@ -195,13 +195,13 @@ describe('PackageManager adapterInit', () => {
     expect(text).toContain('dsh-bundle')
   })
 
-  it('scaffolds a custom adapter for plain plugins', () => {
+  it('scaffolds a custom adapter for plain plugins', async () => {
     const home = tempDir()
     const plain = join(home, 'plain')
     mkdirSync(plain, { recursive: true })
     writeFileSync(join(plain, 'package.json'), JSON.stringify({ name: 'plain-plugin', version: '1.0.0' }))
     const out = join(home, 'requirements')
-    const result = createPackageManager({ home }).adapterInit({ source: plain, id: 'plain', outDir: out })
+    const result = await createPackageManager({ home }).adapterInit({ source: plain, id: 'plain', outDir: out })
     expect(result.adapter).toBe('custom')
     expect(existsSync(join(out, 'requirements', 'adapters', 'plain', 'adapter.yaml'))).toBe(true)
     expect(readFileSync(join(out, 'requirements', 'deps.yaml'), 'utf8')).toContain('custom')
@@ -214,7 +214,7 @@ describe('PackageManager adapterInit', () => {
     mkdirSync(plain, { recursive: true })
     writeFileSync(join(plain, 'package.json'), JSON.stringify({ name: 'plain-plugin', version: '1.0.0' }))
     const out = join(home, 'requirements')
-    manager.adapterInit({ source: plain, id: 'plain', outDir: out })
+    await manager.adapterInit({ source: plain, id: 'plain', outDir: out })
 
     const adapterPath = join(out, 'requirements', 'adapters', 'plain', 'adapter.yaml')
     writeFileSync(adapterPath, `id: plain

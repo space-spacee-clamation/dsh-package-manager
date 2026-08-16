@@ -139,7 +139,7 @@ export function apply(ctx: Context): void {
         throw new Error(`pm_scaffold only runs inside a package-manager plugin workspace (${cwd} has no package-manager.json)`)
       }
       const source = resolveSourceFor(cwd, manifest.source)
-      const result = service.manager.adapterInit({
+      const result = await service.manager.adapterInit({
         source,
         id: manifest.id,
         outDir: cwd,

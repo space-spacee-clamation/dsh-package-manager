@@ -1,5 +1,6 @@
 import { Context, Service } from "@deepseek-ai/cordis";
 import z from "@deepseek-ai/schemastery";
+import { SubprocessRuntime } from "@deepseek-ai/dsh-subprocess";
 //#region src/types.d.ts
 /**
  * Wire types shared by the package-manager core, adapters, and the Web API.
@@ -304,13 +305,46 @@ interface SpawnResult {
   stderr: string;
 }
 //#endregion
+//#region src/host.d.ts
+interface PackageManagerHost {
+  readonly name: string;
+  pnpm(args: string[], cwd: string, env: Record<string, string>): Promise<SpawnResult>;
+  git(args: string[], cwd: string): Promise<SpawnResult>;
+  shell(command: string, cwd: string, env: Record<string, string>): Promise<SpawnResult>;
+}
+/** Current-machine adapter. This is the CLI/tests default and the fallback. */
+declare class LocalHost implements PackageManagerHost {
+  readonly name = "local";
+  pnpm(args: string[], cwd: string, env: Record<string, string>): Promise<SpawnResult>;
+  git(args: string[], cwd: string): Promise<SpawnResult>;
+  shell(command: string, cwd: string, env: Record<string, string>): Promise<SpawnResult>;
+}
+/**
+ * Harness execution-world adapter. Resolves executables and spawns through
+ * `ctx.subprocess`, falling back to the local host whenever that service is
+ * not mounted or a command cannot be resolved in the harness world.
+ */
+declare class HarnessHost implements PackageManagerHost {
+  private readonly ctx;
+  private readonly subprocess?;
+  readonly name: string;
+  private readonly fallback;
+  constructor(ctx: Context, subprocess?: SubprocessRuntime | undefined);
+  pnpm(args: string[], cwd: string, env: Record<string, string>): Promise<SpawnResult>;
+  git(args: string[], cwd: string): Promise<SpawnResult>;
+  shell(command: string, cwd: string, env: Record<string, string>): Promise<SpawnResult>;
+  private run;
+  private runFallback;
+}
+declare function createHost(ctx?: Context): PackageManagerHost;
+//#endregion
 //#region src/source.d.ts
-type GitRunner = (args: string[], cwd: string) => SpawnResult;
+type GitRunner = (args: string[], cwd: string) => Promise<SpawnResult>;
 //#endregion
 //#region src/steps.d.ts
-/** pnpm invocation seam: tests substitute a fake, production shells out. */
-type PnpmRunner = (args: string[], cwd: string, env: Record<string, string>) => SpawnResult;
-type CommandRunner = (command: string, cwd: string, env: Record<string, string>) => SpawnResult;
+/** pnpm invocation seam: tests substitute a fake, production delegates to the host adapter. */
+type PnpmRunner = (args: string[], cwd: string, env: Record<string, string>) => Promise<SpawnResult>;
+type CommandRunner = (command: string, cwd: string, env: Record<string, string>) => Promise<SpawnResult>;
 //#endregion
 //#region src/manager.d.ts
 interface PackageManagerOptions {
@@ -318,6 +352,8 @@ interface PackageManagerOptions {
   pnpm?: PnpmRunner;
   command?: CommandRunner;
   git?: GitRunner;
+  /** Process-host adapter for pnpm/git/shell; defaults to local or harness execution. */
+  host?: PackageManagerHost;
   /** In-process Cordis hot-plug seam; absent for the CLI and tests. */
   runtime?: PackageManagerRuntime;
 }
@@ -350,7 +386,7 @@ declare class PackageManager {
   /** Switch a disabled plugin back on by replaying its remembered request. */
   enable(request: ToggleRequest): Promise<InstallResult>;
   /** Analyze a source and scaffold a requirements entry + adapter for it. */
-  adapterInit(request: AdapterInitRequest): AdapterInitResult;
+  adapterInit(request: AdapterInitRequest): Promise<AdapterInitResult>;
   private resolveAdapter;
   private writeDepsEntry;
   private clearDisabled;
@@ -393,4 +429,4 @@ declare class PackageManagerService extends Service {
  */
 declare function apply(ctx: Context, config: Config): void;
 //#endregion
-export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, type AiInstallRequest, type AiInstallResult, Config, type DisabledEntry, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, type ManagerState, type OperationLog, PackageManager, type PackageManagerConfig, type PackageManagerOptions, type PackageManagerRuntime, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestoreRequest, type RestoreResult, type RuntimeMountResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type ToggleRequest, type UninstallRequest, type UninstallResult, apply, createPackageManager, idFromSource, name };
+export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, type AiInstallRequest, type AiInstallResult, Config, type DisabledEntry, HarnessHost, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, LocalHost, type ManagerState, type OperationLog, PackageManager, type PackageManagerConfig, type PackageManagerHost, type PackageManagerOptions, type PackageManagerRuntime, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestoreRequest, type RestoreResult, type RuntimeMountResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type ToggleRequest, type UninstallRequest, type UninstallResult, apply, createHost, createPackageManager, idFromSource, name };

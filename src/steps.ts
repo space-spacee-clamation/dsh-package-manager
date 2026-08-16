@@ -19,17 +19,17 @@ import {
 } from './profile.ts'
 import type { AdapterContext, SpawnResult, StepRecord, StepSpec } from './types.ts'
 
-/** pnpm invocation seam: tests substitute a fake, production shells out. */
-export type PnpmRunner = (args: string[], cwd: string, env: Record<string, string>) => SpawnResult
+/** pnpm invocation seam: tests substitute a fake, production delegates to the host adapter. */
+export type PnpmRunner = (args: string[], cwd: string, env: Record<string, string>) => Promise<SpawnResult>
 
-export type CommandRunner = (command: string, cwd: string, env: Record<string, string>) => SpawnResult
+export type CommandRunner = (command: string, cwd: string, env: Record<string, string>) => Promise<SpawnResult>
 
 export function defaultPnpmRunner(): PnpmRunner {
-  return (args, cwd, env) => spawnResult('pnpm', args, cwd, env)
+  return async (args, cwd, env) => spawnResult('pnpm', args, cwd, env)
 }
 
 export function defaultCommandRunner(): CommandRunner {
-  return (command, cwd, env) => {
+  return async (command, cwd, env) => {
     const result = spawnSync(command, {
       cwd,
       env: { ...process.env, ...env },
@@ -189,7 +189,7 @@ export class StepExecutor {
       case 'profile.dependency.add': {
         const specText = String(spec.spec)
         const before = readManifest(ctx.profileDir).dependencies ?? {}
-        this.runPnpm(['add', specText], ctx.profileDir, ctx)
+        await this.runPnpm(['add', specText], ctx.profileDir, ctx)
         const after = readManifest(ctx.profileDir).dependencies ?? {}
         const packageName = addedDependency(before, after)
         if (packageName === undefined) throw new Error(`pnpm add ${JSON.stringify(specText)} reported success but wrote no dependency`)
@@ -201,7 +201,7 @@ export class StepExecutor {
         const packageName = String(spec.packageName)
         const before = readManifest(ctx.profileDir).dependencies ?? {}
         const previousSpec = before[packageName]
-        this.runPnpm(['remove', packageName], ctx.profileDir, ctx)
+        await this.runPnpm(['remove', packageName], ctx.profileDir, ctx)
         const label = `pnpm remove ${packageName}`
         return {
           ...base,
@@ -351,7 +351,7 @@ export class StepExecutor {
         const args = (spec.args as string[]).map(arg => String(arg))
         const cwd = String(spec.cwd)
         const unargs = (spec.unargs as string[] | undefined)?.map(arg => String(arg)) ?? []
-        if (args.length > 0) this.runPnpm(args, cwd, ctx)
+        if (args.length > 0) await this.runPnpm(args, cwd, ctx)
         return {
           ...base,
           label: `pnpm ${args.join(' ')} (${cwd})`,
@@ -441,7 +441,7 @@ export class StepExecutor {
         const unrun = String(spec.unrun)
         const cwd = typeof spec.cwd === 'string' ? spec.cwd : ctx.profileDir
         const env = envOf(spec)
-        this.runCommand(run, cwd, env)
+        await this.runCommand(run, cwd, env)
         return {
           ...base,
           label: `command: ${run}`,
@@ -454,7 +454,7 @@ export class StepExecutor {
         const run = String(spec.run)
         const cwd = typeof spec.cwd === 'string' ? spec.cwd : ctx.profileDir
         const env = envOf(spec)
-        this.runCommand(run, cwd, env)
+        await this.runCommand(run, cwd, env)
         return { ...base, label: `check: ${run}`, params: { run, cwd, env }, inverse: { uses: 'noop' } }
       }
 
@@ -463,16 +463,16 @@ export class StepExecutor {
     }
   }
 
-  private runPnpm(args: string[], cwd: string, ctx: AdapterContext): void {
-    const result = this.pnpm(args, cwd, { PM_PROFILE: ctx.profileDir, PM_HOME: ctx.home })
+  private async runPnpm(args: string[], cwd: string, ctx: AdapterContext): Promise<void> {
+    const result = await this.pnpm(args, cwd, { PM_PROFILE: ctx.profileDir, PM_HOME: ctx.home })
     if (result.exitCode !== 0) {
       throw new Error(`pnpm ${args.join(' ')} failed (exit ${result.exitCode}): ${tail(result.stderr || result.stdout)}`)
     }
     ctx.log('info', `pnpm ${args.join(' ')} (${cwd})`)
   }
 
-  private runCommand(run: string, cwd: string, env: Record<string, string>): void {
-    const result = this.command(run, cwd, env)
+  private async runCommand(run: string, cwd: string, env: Record<string, string>): Promise<void> {
+    const result = await this.command(run, cwd, env)
     if (result.exitCode !== 0) {
       throw new Error(`command failed (exit ${result.exitCode}): ${run}\n${tail(result.stderr || result.stdout)}`)
     }

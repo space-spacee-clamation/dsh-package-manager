@@ -32,7 +32,7 @@ function ctx(profileDir: string, workDir: string): AdapterContext {
 
 /** Fake pnpm that actually mutates the profile manifest the way pnpm would. */
 function fakePnpm(): PnpmRunner {
-  return (args, cwd): SpawnResult => {
+  return async (args, cwd): Promise<SpawnResult> => {
     const manifest = readManifest(cwd)
     const deps = { ...(manifest.dependencies ?? {}) }
     if (args[0] === 'add') {
@@ -57,7 +57,7 @@ describe('validateStepSpec', () => {
 describe('StepExecutor file steps', () => {
   it('copies, writes, removes, and restores files through recorded inverses', async () => {
     const dir = tempDir()
-    const executor = new StepExecutor(fakePnpm(), () => ({ exitCode: 0, stdout: '', stderr: '' }))
+    const executor = new StepExecutor(fakePnpm(), async () => ({ exitCode: 0, stdout: '', stderr: '' }))
     const target = join(dir, 'target.txt')
     writeFileSync(join(dir, 'from.txt'), 'hello')
     const records = await executor.run(
@@ -76,7 +76,7 @@ describe('StepExecutor file steps', () => {
 
   it('restores a pre-existing file when a write is rolled back', async () => {
     const dir = tempDir()
-    const executor = new StepExecutor(fakePnpm(), () => ({ exitCode: 0, stdout: '', stderr: '' }))
+    const executor = new StepExecutor(fakePnpm(), async () => ({ exitCode: 0, stdout: '', stderr: '' }))
     const target = join(dir, 'target.txt')
     writeFileSync(target, 'original')
     const records = await executor.run(
@@ -91,7 +91,7 @@ describe('StepExecutor file steps', () => {
 
   it('reports every failure during rollback and keeps sweeping', async () => {
     const dir = tempDir()
-    const executor = new StepExecutor(fakePnpm(), () => ({ exitCode: 0, stdout: '', stderr: '' }))
+    const executor = new StepExecutor(fakePnpm(), async () => ({ exitCode: 0, stdout: '', stderr: '' }))
     const target = join(dir, 'a.txt')
     writeFileSync(target, 'original')
     const records = await executor.run(
@@ -109,7 +109,7 @@ describe('StepExecutor profile steps', () => {
   it('adds and removes dependencies with pnpm, recording the resolved package name', async () => {
     const dir = tempDir()
     ensureProfile(dir, 'web')
-    const executor = new StepExecutor(fakePnpm(), () => ({ exitCode: 0, stdout: '', stderr: '' }))
+    const executor = new StepExecutor(fakePnpm(), async () => ({ exitCode: 0, stdout: '', stderr: '' }))
     const records = await executor.run(
       [{ uses: 'profile.dependency.add', spec: 'file:fixture' }],
       ctx(dir, dir),
@@ -127,7 +127,7 @@ describe('StepExecutor profile steps', () => {
     const manifest = readManifest(dir)
     manifest.dependencies = { 'fixture-bundle': 'file:../fixture' }
     writeManifest(dir, manifest)
-    const executor = new StepExecutor(fakePnpm(), () => ({ exitCode: 0, stdout: '', stderr: '' }))
+    const executor = new StepExecutor(fakePnpm(), async () => ({ exitCode: 0, stdout: '', stderr: '' }))
     const records = await executor.run(
       [{ uses: 'profile.bundles.reconcile' }],
       ctx(dir, dir),

@@ -113,7 +113,7 @@ async function main() {
       return
     }
     case 'adapter-init': {
-      const result = manager.adapterInit({
+      const result = await manager.adapterInit({
         source: valueOf(['--source', '-s']) ?? '',
         id: valueOf(['--id', '-i']) ?? '',
         outDir: valueOf(['--out-dir', '-o']) ?? '.',

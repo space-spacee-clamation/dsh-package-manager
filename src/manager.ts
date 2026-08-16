@@ -12,13 +12,14 @@ import YAML from 'yaml'
 import { builtinInstallSteps, isGitSpec, probeBundleDir } from './adapters/builtin-bundle.ts'
 import { loadCustomAdapter, runCustomInstall, scaffoldCustomAdapter } from './adapters/custom.ts'
 import { getEntry, listEntries, loadLedger, removeEntry, saveLedger, setEntry } from './ledger.ts'
+import { createHost, type PackageManagerHost } from './host.ts'
 import { cacheRoot, defaultWorkspaceRoot, pmRoot, profileDir, resolveHome } from './paths.ts'
 import { pluginEnvDir, pluginWorkspaceDir } from './pluginWorkspace.ts'
 import { loadConfig, loadDisabled, removeDisabledEntry, saveConfig, saveDisabled, upsertDisabledEntry } from './config.ts'
 import { ensureProfile, listProfiles, readManifest } from './profile.ts'
-import { defaultGitRunner, detectSourceKind, materializeSource, type GitRunner } from './source.ts'
+import { detectSourceKind, materializeSource, type GitRunner } from './source.ts'
 import { parseRequirements, planRestore, resolveAdapterDir, fingerprint } from './spec.ts'
-import { defaultCommandRunner, defaultPnpmRunner, StepExecutor, type CommandRunner, type PnpmRunner } from './steps.ts'
+import { StepExecutor, type CommandRunner, type PnpmRunner } from './steps.ts'
 import type {
   AdapterContext, AdapterInitRequest, AdapterInitResult, DisabledEntry, InstallRequest, InstallResult, Ledger,
   LedgerEntry, ManagerState, OperationLog, PackageManagerConfig, PackageManagerRuntime, PlanAction, RestoreRequest,
@@ -30,6 +31,8 @@ export interface PackageManagerOptions {
   pnpm?: PnpmRunner
   command?: CommandRunner
   git?: GitRunner
+  /** Process-host adapter for pnpm/git/shell; defaults to local or harness execution. */
+  host?: PackageManagerHost
   /** In-process Cordis hot-plug seam; absent for the CLI and tests. */
   runtime?: PackageManagerRuntime
 }
@@ -45,8 +48,12 @@ export class PackageManager {
 
   constructor(options: PackageManagerOptions = {}) {
     this.home = options.home ?? resolveHome()
-    this.executor = new StepExecutor(options.pnpm ?? defaultPnpmRunner(), options.command ?? defaultCommandRunner())
-    this.git = options.git ?? defaultGitRunner()
+    const host = options.host ?? createHost()
+    this.executor = new StepExecutor(
+      options.pnpm ?? ((args, cwd, env) => host.pnpm(args, cwd, env)),
+      options.command ?? ((command, cwd, env) => host.shell(command, cwd, env)),
+    )
+    this.git = options.git ?? ((args, cwd) => host.git(args, cwd))
     this.runtime = options.runtime
   }
 
@@ -144,7 +151,7 @@ export class PackageManager {
 
     let records: StepRecord[] = []
     try {
-      const materialized = kind === 'npm' ? undefined : materializeSource(workDir, source, ref, this.git)
+      const materialized = kind === 'npm' ? undefined : await materializeSource(workDir, source, ref, this.git)
       const resolved = this.resolveAdapter(request.adapter, request.adapterDir ?? '', source, materialized?.dir ?? '')
       const packageName = resolved.packageName ?? (kind === 'npm' ? npmNameOf(source) : '')
       log('info', `adapter: ${resolved.kind}${resolved.reason === '' ? '' : ` (${resolved.reason})`}`)
@@ -347,7 +354,7 @@ export class PackageManager {
   async sync(request: SyncRequest): Promise<RestoreResult> {
     const repo = resolve(request.repo)
     if (!existsSync(join(repo, '.git'))) throw new Error(`sync repo is not a git checkout: ${repo}`)
-    const pulled = this.git(['pull', '--ff-only'], repo)
+    const pulled = await this.git(['pull', '--ff-only'], repo)
     if (pulled.exitCode !== 0) throw new Error(`git pull failed (exit ${pulled.exitCode}): ${pulled.stderr || pulled.stdout}`)
     const file = resolve(request.file ?? join(repo, 'requirements', DEPS_FILENAME))
     return this.restore({
@@ -381,21 +388,21 @@ export class PackageManager {
         const parent = dirname(repo)
         mkdirSync(parent, { recursive: true })
         mkdirSync(repo, { recursive: true })
-        const clone = this.git(['clone', '--quiet', config.remoteUrl, repo], parent)
+        const clone = await this.git(['clone', '--quiet', config.remoteUrl, repo], parent)
         if (clone.exitCode !== 0) throw new Error(`git clone failed (exit ${clone.exitCode}): ${clone.stderr || clone.stdout}`)
       } else {
-        const remote = this.git(['remote', 'get-url', 'origin'], repo)
+        const remote = await this.git(['remote', 'get-url', 'origin'], repo)
         if (remote.exitCode !== 0) {
-          const add = this.git(['remote', 'add', 'origin', config.remoteUrl], repo)
+          const add = await this.git(['remote', 'add', 'origin', config.remoteUrl], repo)
           if (add.exitCode !== 0) throw new Error(`git remote add failed (exit ${add.exitCode}): ${add.stderr || add.stdout}`)
         } else if (remote.stdout.trim() !== config.remoteUrl) {
-          const set = this.git(['remote', 'set-url', 'origin', config.remoteUrl], repo)
+          const set = await this.git(['remote', 'set-url', 'origin', config.remoteUrl], repo)
           if (set.exitCode !== 0) throw new Error(`git remote set-url failed (exit ${set.exitCode}): ${set.stderr || set.stdout}`)
         }
       }
     }
     if (!existsSync(join(repo, '.git'))) throw new Error(`package storage path is not a git checkout: ${repo}`)
-    const pulled = this.git(['pull', '--ff-only'], repo)
+    const pulled = await this.git(['pull', '--ff-only'], repo)
     if (pulled.exitCode !== 0) throw new Error(`git pull failed (exit ${pulled.exitCode}): ${pulled.stderr || pulled.stdout}`)
     const file = join(repo, 'requirements', DEPS_FILENAME)
     if (!existsSync(file)) throw new Error(`requirements file not found: ${file}`)
@@ -442,13 +449,13 @@ export class PackageManager {
   }
 
   /** Analyze a source and scaffold a requirements entry + adapter for it. */
-  adapterInit(request: AdapterInitRequest): AdapterInitResult {
+  async adapterInit(request: AdapterInitRequest): Promise<AdapterInitResult> {
     const logs: OperationLog[] = []
     const log = (level: OperationLog['level'], message: string): void => { logs.push({ level, message }) }
     const outDir = resolve(request.outDir)
     mkdirSync(outDir, { recursive: true })
     const workDir = this.workDir('probe', request.id)
-    const materialized = materializeSource(workDir, request.source, request.ref ?? '', this.git)
+    const materialized = await materializeSource(workDir, request.source, request.ref ?? '', this.git)
     if (materialized.kind === 'npm') {
       log('info', `npm source ${request.source}: the dsh-bundle adapter will drive pnpm directly (no adapter file needed)`)
       this.writeDepsEntry(outDir, request, 'dsh-bundle', '')

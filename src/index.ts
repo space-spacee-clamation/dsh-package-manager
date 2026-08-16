@@ -11,11 +11,13 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { dispatchAiInstall } from './ai.ts'
+import { createHost } from './host.ts'
 import { PackageManager } from './manager.ts'
 import { CordisRuntime } from './runtime.ts'
 import type { AiInstallRequest, AiInstallResult } from './types.ts'
 
 export { PackageManager, createPackageManager, idFromSource, type PackageManagerOptions } from './manager.ts'
+export { LocalHost, HarnessHost, createHost, type PackageManagerHost } from './host.ts'
 export type * from './types.ts'
 
 export const name = 'package-manager'
@@ -49,6 +51,7 @@ export class PackageManagerService extends Service {
     this.apiPrefix = config.apiPrefix
     this.manager = new PackageManager({
       ...(config.home === '' ? {} : { home: config.home }),
+      host: createHost(ctx),
       runtime: new CordisRuntime(ctx),
     })
     const managerConfig = this.manager.getConfig()
