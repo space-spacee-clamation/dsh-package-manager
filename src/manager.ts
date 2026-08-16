@@ -1,0 +1,395 @@
+/**
+ * Package manager core: installs, uninstalls, restores, syncs, and scaffolds
+ * adapters. Install steps are transactional — any failure replays the recorded
+ * inverses LIFO — and every successful install persists its step records so
+ * uninstall is the same replay, never a separately authored procedure.
+ * @module @dsh-ext/dsh-package-manager/manager
+ */
+
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import YAML from 'yaml'
+import { builtinInstallSteps, isGitSpec, probeBundleDir } from './adapters/builtin-bundle.ts'
+import { loadCustomAdapter, runCustomInstall, scaffoldCustomAdapter } from './adapters/custom.ts'
+import { getEntry, listEntries, loadLedger, removeEntry, saveLedger, setEntry } from './ledger.ts'
+import { cacheRoot, pmRoot, profileDir, resolveHome } from './paths.ts'
+import { ensureProfile, listProfiles, readManifest } from './profile.ts'
+import { defaultGitRunner, detectSourceKind, materializeSource, type GitRunner } from './source.ts'
+import { parseRequirements, planRestore, resolveAdapterDir, fingerprint } from './spec.ts'
+import { defaultCommandRunner, defaultPnpmRunner, StepExecutor, type CommandRunner, type PnpmRunner } from './steps.ts'
+import type {
+  AdapterContext, AdapterInitRequest, AdapterInitResult, InstallRequest, InstallResult, Ledger,
+  LedgerEntry, ManagerState, OperationLog, PlanAction, RestoreRequest, RestoreResult, SpecEntry,
+  StepRecord, SyncRequest, UninstallRequest, UninstallResult,
+} from './types.ts'
+
+export interface PackageManagerOptions {
+  home?: string
+  pnpm?: PnpmRunner
+  command?: CommandRunner
+  git?: GitRunner
+}
+
+const RESTART_MARKER = 'restart-needed'
+const DEPS_FILENAME = 'deps.yaml'
+
+export class PackageManager {
+  readonly home: string
+  private readonly executor: StepExecutor
+  private readonly git: GitRunner
+
+  constructor(options: PackageManagerOptions = {}) {
+    this.home = options.home ?? resolveHome()
+    this.executor = new StepExecutor(options.pnpm ?? defaultPnpmRunner(), options.command ?? defaultCommandRunner())
+    this.git = options.git ?? defaultGitRunner()
+  }
+
+  /** Read-only view for the Web UI and CLI. */
+  state(): ManagerState {
+    const profiles = listProfiles(this.home).map(name => {
+      const dir = profileDir(this.home, name)
+      const manifest = readManifest(dir)
+      return {
+        name,
+        dir,
+        exists: true,
+        bundles: [...(manifest.dsh?.profile?.bundles ?? [])],
+        dependencies: Object.keys(manifest.dependencies ?? {}),
+      }
+    })
+    return {
+      home: this.home,
+      restartNeeded: existsSync(this.restartMarker()),
+      profiles,
+      entries: listEntries(loadLedger(this.home)),
+    }
+  }
+
+  /** Remove the restart hint (the Web UI calls this once the user acknowledged it). */
+  clearRestartMarker(): void {
+    rmSync(this.restartMarker(), { force: true })
+  }
+
+  async install(request: InstallRequest): Promise<InstallResult> {
+    const logs: OperationLog[] = []
+    const log = (level: OperationLog['level'], message: string): void => { logs.push({ level, message }) }
+    const profile = request.profile
+    const id = request.id ?? idFromSource(request.source)
+    const dir = profileDir(this.home, profile)
+    ensureProfile(dir, profile)
+    const source = request.source
+    const ref = request.ref ?? ''
+    const allowBuild = request.allowBuild ?? false
+
+    if (request.dryRun === true) {
+      log('info', `dry run: would install ${JSON.stringify(id)} into profile ${JSON.stringify(profile)} from ${JSON.stringify(source)}`)
+      log('info', `dry run: adapter ${request.adapter}, allowBuild ${String(allowBuild)}`)
+      return { profile, id, adapter: request.adapter, packageName: '', steps: [], logs, dryRun: true }
+    }
+
+    const ledger = loadLedger(this.home)
+    if (getEntry(ledger, profile, id) !== undefined) {
+      throw new Error(`plugin ${JSON.stringify(id)} is already installed in profile ${JSON.stringify(profile)} — uninstall it first, or change its spec via restore`)
+    }
+
+    const kind = detectSourceKind(source)
+    const workDir = this.workDir(profile, id)
+    const ctx: AdapterContext = { home: this.home, profileDir: dir, workDir, source, ref, log }
+
+    let records: StepRecord[] = []
+    try {
+      const materialized = kind === 'npm' ? undefined : materializeSource(workDir, source, ref, this.git)
+      const resolved = this.resolveAdapter(request.adapter, request.adapterDir ?? '', source, materialized?.dir ?? '')
+      const packageName = resolved.packageName ?? (kind === 'npm' ? npmNameOf(source) : '')
+      log('info', `adapter: ${resolved.kind}${resolved.reason === '' ? '' : ` (${resolved.reason})`}`)
+
+      if (resolved.kind === 'dsh-bundle') {
+        const steps = builtinInstallSteps(
+          { source, ref, allowBuild, packageName, executor: this.executor },
+          ctx,
+        )
+        records = await this.executor.run(steps, ctx, join(workDir, 'backups'))
+      } else {
+        if (resolved.adapterDir === '') {
+          throw new Error(`plugin ${JSON.stringify(id)} needs a custom adapter but none was provided — run adapter-init to scaffold one`)
+        }
+        const adapter = loadCustomAdapter(resolved.adapterDir, ctx)
+        records = await runCustomInstall(
+          { adapter, executor: this.executor, backupRoot: join(workDir, 'backups') },
+          ctx,
+        )
+      }
+      const entry: LedgerEntry = {
+        id,
+        profile,
+        source,
+        sourceKind: kind,
+        ref,
+        adapter: resolved.kind,
+        adapterDir: resolved.adapterDir,
+        packageName,
+        materializedDir: materialized?.dir ?? '',
+        resolvedCommit: materialized?.resolvedCommit ?? '',
+        steps: records,
+        installedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        spec: { source, adapter: request.adapter, adapterDir: request.adapterDir ?? '', ref },
+      }
+      setEntry(ledger, entry)
+      saveLedger(this.home, ledger)
+      this.touchRestart()
+      log('info', `installed ${id} in profile ${profile} (${records.length} steps recorded)`)
+      return { profile, id, adapter: resolved.kind, packageName, steps: records, logs, dryRun: false }
+    } catch (error) {
+      const message = buildScriptHint(source, allowBuild, error)
+      try {
+        if (records.length > 0) await this.executor.rollback(records, ctx, join(workDir, 'backups'))
+      } catch (rollbackError) {
+        throw new Error(`${messageOf(error)}\n${messageOf(rollbackError)}`)
+      }
+      throw new Error(message)
+    }
+  }
+
+  async uninstall(request: UninstallRequest): Promise<UninstallResult> {
+    const logs: OperationLog[] = []
+    const log = (level: OperationLog['level'], message: string): void => { logs.push({ level, message }) }
+    const ledger = loadLedger(this.home)
+    const entry = getEntry(ledger, request.profile, request.id)
+    if (entry === undefined) {
+      throw new Error(`plugin ${JSON.stringify(request.id)} is not installed in profile ${JSON.stringify(request.profile)}`)
+    }
+    if (request.dryRun === true) {
+      log('info', `dry run: would uninstall ${entry.id} from profile ${entry.profile} (${entry.steps.length} inverse steps)`)
+      return { profile: entry.profile, id: entry.id, steps: [], logs, dryRun: true }
+    }
+    const dir = profileDir(this.home, entry.profile)
+    const freshWorkDir = entry.materializedDir === ''
+    const workDir = freshWorkDir ? this.workDir(entry.profile, entry.id) : dirname(entry.materializedDir)
+    const ctx: AdapterContext = { home: this.home, profileDir: dir, workDir, source: entry.source, ref: entry.ref, log }
+    try {
+      await this.executor.rollback(entry.steps, ctx, join(workDir, 'backups'))
+      if (entry.adapter === 'custom' && entry.adapterDir !== '') {
+        const adapter = loadCustomAdapter(entry.adapterDir, ctx)
+        const extra = adapter.uninstall ?? []
+        if (extra.length > 0) {
+          await this.executor.run(extra, ctx, join(workDir, 'extra-backups'))
+          log('info', `custom adapter uninstall steps: ${extra.length}`)
+        }
+      }
+    } catch (error) {
+      throw new Error(`uninstall failed (ledger entry kept for retry): ${messageOf(error)}`)
+    }
+    removeEntry(ledger, entry.profile, entry.id)
+    saveLedger(this.home, ledger)
+    rmSync(workDir, { recursive: true, force: true })
+    this.touchRestart()
+    log('info', `uninstalled ${entry.id} from profile ${entry.profile}`)
+    return { profile: entry.profile, id: entry.id, steps: entry.steps, logs, dryRun: false }
+  }
+
+  async restore(request: RestoreRequest): Promise<RestoreResult> {
+    const logs: OperationLog[] = []
+    const log = (level: OperationLog['level'], message: string): void => { logs.push({ level, message }) }
+    const file = resolve(request.file)
+    const spec = parseRequirements(readFileSync(file, 'utf8'), dirname(file))
+    const ledger = loadLedger(this.home)
+    const actions = planRestore(spec, ledger, request.modes ?? [])
+    const installed: InstallResult[] = []
+    const uninstalled: UninstallResult[] = []
+    const updated: InstallResult[] = []
+
+    for (const action of actions) {
+      log('info', `${action.action}: ${action.profile}/${action.id} — ${action.reason}`)
+      if (action.action === 'keep' || request.dryRun === true) continue
+      try {
+        if (action.action === 'uninstall' || action.action === 'update') {
+          const result = await this.uninstall({ profile: action.profile, id: action.id })
+          uninstalled.push(result)
+          logs.push(...result.logs)
+        }
+        if (action.action === 'install' || action.action === 'update') {
+          const entry = action.entry as SpecEntry
+          const adapterDir = entry.adapter === 'custom' && entry.adapterDir !== ''
+            ? resolveAdapterDir(spec, entry.adapterDir)
+            : ''
+          const result = await this.install({
+            id: entry.id,
+            profile: action.profile,
+            source: entry.source,
+            adapter: entry.adapter,
+            adapterDir,
+            ref: entry.ref,
+            allowBuild: entry.allowBuild,
+          })
+          installed.push(result)
+          if (action.action === 'update') updated.push(result)
+          logs.push(...result.logs)
+        }
+      } catch (error) {
+        throw new Error(`restore failed at ${action.action} ${action.profile}/${action.id}: ${messageOf(error)}`)
+      }
+    }
+    return { file, actions, installed, uninstalled, updated, logs, dryRun: request.dryRun === true }
+  }
+
+  async sync(request: SyncRequest): Promise<RestoreResult> {
+    const repo = resolve(request.repo)
+    if (!existsSync(join(repo, '.git'))) throw new Error(`sync repo is not a git checkout: ${repo}`)
+    const pulled = this.git(['pull', '--ff-only'], repo)
+    if (pulled.exitCode !== 0) throw new Error(`git pull failed (exit ${pulled.exitCode}): ${pulled.stderr || pulled.stdout}`)
+    const file = resolve(request.file ?? join(repo, 'requirements', DEPS_FILENAME))
+    return this.restore({
+      file,
+      ...(request.modes === undefined ? {} : { modes: request.modes }),
+      ...(request.dryRun === undefined ? {} : { dryRun: request.dryRun }),
+    })
+  }
+
+  /** Analyze a source and scaffold a requirements entry + adapter for it. */
+  adapterInit(request: AdapterInitRequest): AdapterInitResult {
+    const logs: OperationLog[] = []
+    const log = (level: OperationLog['level'], message: string): void => { logs.push({ level, message }) }
+    const outDir = resolve(request.outDir)
+    mkdirSync(outDir, { recursive: true })
+    const workDir = this.workDir('probe', request.id)
+    const materialized = materializeSource(workDir, request.source, request.ref ?? '', this.git)
+    if (materialized.kind === 'npm') {
+      log('info', `npm source ${request.source}: the dsh-bundle adapter will drive pnpm directly (no adapter file needed)`)
+      this.writeDepsEntry(outDir, request, 'dsh-bundle', '')
+      return { id: request.id, adapter: 'dsh-bundle', reason: 'npm dependency resolved through pnpm', outDir, depsUpdated: true, logs }
+    }
+    const probe = probeBundleDir(materialized.dir)
+    let adapter = probe.adapter
+    let adapterDir = ''
+    if (probe.adapter === 'dsh-bundle') {
+      log('info', `detected dsh-bundle plugin${probe.packageName === undefined ? '' : ` ${probe.packageName}`}: no custom adapter needed`)
+    } else {
+      adapterDir = join(outDir, 'requirements', 'adapters', request.id)
+      mkdirSync(adapterDir, { recursive: true })
+      scaffoldCustomAdapter(adapterDir, request.id, probe.reason)
+      log('info', `scaffolded custom adapter at ${adapterDir} — fill in install/uninstall/verify steps, then re-run install`)
+      adapter = 'custom'
+    }
+    this.writeDepsEntry(outDir, request, adapter, adapterDir === '' ? '' : `adapters/${request.id}`)
+    return { id: request.id, adapter, reason: probe.reason, outDir, depsUpdated: true, logs }
+  }
+
+  private resolveAdapter(
+    requested: InstallRequest['adapter'],
+    adapterDir: string,
+    source: string,
+    materializedDir: string,
+  ): { kind: 'dsh-bundle' | 'custom'; reason: string; packageName?: string; adapterDir: string } {
+    if (requested === 'custom') {
+      if (adapterDir === '' || !existsSync(adapterDir)) throw new Error(`custom adapter requested but adapterDir does not exist: ${adapterDir || '(empty)'}`)
+      return { kind: 'custom', reason: 'requested', adapterDir }
+    }
+    if (requested === 'dsh-bundle' && materializedDir !== '') {
+      const probe = probeBundleDir(materializedDir)
+      if (probe.adapter !== 'dsh-bundle') {
+        throw new Error(`adapter dsh-bundle requested but ${JSON.stringify(source)} declares no dsh.bundle.patch — use adapter auto or a custom adapter`)
+      }
+      return {
+        kind: 'dsh-bundle',
+        reason: probe.reason,
+        adapterDir: '',
+        ...(probe.packageName === undefined ? {} : { packageName: probe.packageName }),
+      }
+    }
+    if (requested === 'dsh-bundle') return { kind: 'dsh-bundle', reason: 'requested', adapterDir: '' }
+    if (materializedDir === '') return { kind: 'dsh-bundle', reason: 'npm dependency — bundle declaration reconciled after install', adapterDir: '' }
+    const probe = probeBundleDir(materializedDir)
+    if (probe.adapter === 'dsh-bundle') {
+      return {
+        kind: 'dsh-bundle',
+        reason: probe.reason,
+        adapterDir: '',
+        ...(probe.packageName === undefined ? {} : { packageName: probe.packageName }),
+      }
+    }
+    return { kind: 'custom', reason: probe.reason, adapterDir }
+  }
+
+  private writeDepsEntry(outDir: string, request: AdapterInitRequest, adapter: string, relativeAdapterDir: string): void {
+    const depsPath = join(outDir, 'requirements', DEPS_FILENAME)
+    mkdirSync(dirname(depsPath), { recursive: true })
+    let doc: Record<string, unknown>
+    if (existsSync(depsPath)) {
+      const parsed = YAML.parse(readFileSync(depsPath, 'utf8')) as unknown
+      doc = (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed as Record<string, unknown> : {}
+    } else {
+      doc = { version: 1, repo: '.', modes: {} }
+    }
+    const modes = (doc.modes !== null && typeof doc.modes === 'object' && !Array.isArray(doc.modes))
+      ? doc.modes as Record<string, unknown>
+      : {}
+    const entries = (modes[request.profile ?? 'web'] !== undefined && Array.isArray(modes[request.profile ?? 'web']))
+      ? [...(modes[request.profile ?? 'web'] as Record<string, unknown>[])]
+      : []
+    const index = entries.findIndex(entry => entry !== null && typeof entry === 'object' && (entry as Record<string, unknown>).id === request.id)
+    const entry: Record<string, unknown> = {
+      id: request.id,
+      source: request.source,
+      adapter,
+      allowBuild: false,
+    }
+    if (request.ref !== undefined && request.ref !== '') entry.ref = request.ref
+    if (relativeAdapterDir !== '') entry.adapterDir = relativeAdapterDir
+    if (index >= 0) entries[index] = entry
+    else entries.push(entry)
+    modes[request.profile ?? 'web'] = entries
+    doc.modes = modes
+    writeFileSync(depsPath, YAML.stringify(doc))
+  }
+
+  private workDir(profile: string, id: string): string {
+    const safe = id.replaceAll(/[^A-Za-z0-9._-]/g, '-')
+    return join(cacheRoot(this.home), 'work', `${profile}-${safe}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+  }
+
+  private restartMarker(): string {
+    return join(pmRoot(this.home), RESTART_MARKER)
+  }
+
+  private touchRestart(): void {
+    mkdirSync(pmRoot(this.home), { recursive: true })
+    writeFileSync(this.restartMarker(), new Date().toISOString() + '\n')
+  }
+}
+
+/** Create a manager bound to one harness home (CLI / tests seam). */
+export function createPackageManager(options: PackageManagerOptions = {}): PackageManager {
+  return new PackageManager(options)
+}
+
+export function idFromSource(source: string): string {
+  const github = /^github:([^/#]+?)(?:#.*)?$/.exec(source)
+  if (github !== null && github[1] !== undefined) return github[1].split('/').pop() ?? github[1]
+  const clean = source.replace(/^git\+/, '').replace(/(?:\.git)?#.*$/, '').replace(/^.*[/:]/, '')
+  return clean === '' || clean === '.' ? 'plugin' : clean
+}
+
+function npmNameOf(source: string): string {
+  const stripped = source.replace(/^npm:/, '')
+  if (stripped.startsWith('@')) {
+    const parts = stripped.split('/')
+    if (parts.length < 2) return stripped
+    const scope = parts[0]
+    const tail = (parts[1] ?? '').split('@')[0] ?? ''
+    return tail === '' ? stripped : `${scope}/${tail}`
+  }
+  return stripped.split('@')[0] ?? stripped
+}
+
+function buildScriptHint(source: string, allowBuild: boolean, error: unknown): string {
+  const message = messageOf(error)
+  if (!allowBuild && isGitSpec(source) && /build script|ignored build|approve-builds|allowBuilds|build scripts/i.test(message)) {
+    return `${message}\nhint: this git-hosted plugin runs build scripts. Re-run with allowBuild: true — the manager adds the exact package to the profile's pnpm allowBuilds list and records the inverse for uninstall.`
+  }
+  return message
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
