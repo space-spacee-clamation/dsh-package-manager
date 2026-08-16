@@ -53,6 +53,10 @@ async function main() {
   restore   --file <requirements.yaml> [--modes a,b] [--dry-run]
   sync      --repo <path> [--file <requirements.yaml>] [--modes a,b] [--dry-run]
   adapter-init --source <spec> --id <id> --out-dir <dir> [--profile web] [--ref <ref>]
+  config      [--storage-path <dir>] [--remote-url <url>] [--auto-sync]
+  sync-configured
+  disable     --profile <name> --id <id>
+  enable      --profile <name> --id <id>
 `)
     return
   }
@@ -115,6 +119,40 @@ async function main() {
         outDir: valueOf(['--out-dir', '-o']) ?? '.',
         profile: valueOf(['--profile', '-p']),
         ref: valueOf(['--ref']),
+      })
+      printLogs(result)
+      print(result)
+      return
+    }
+    case 'config': {
+      const current = manager.getConfig()
+      const next = {
+        storagePath: valueOf(['--storage-path']) ?? current.storagePath,
+        remoteUrl: valueOf(['--remote-url']) ?? current.remoteUrl,
+        autoSync: valueOf(['--auto-sync']) === undefined ? current.autoSync : boolOf(['--auto-sync']),
+      }
+      print(manager.setConfig(next))
+      return
+    }
+    case 'sync-configured': {
+      const result = await manager.syncConfigured()
+      printLogs(result)
+      print(result)
+      return
+    }
+    case 'disable': {
+      const result = await manager.disable({
+        profile: valueOf(['--profile', '-p']) ?? 'web',
+        id: valueOf(['--id', '-i']) ?? '',
+      })
+      printLogs(result)
+      print(result)
+      return
+    }
+    case 'enable': {
+      const result = await manager.enable({
+        profile: valueOf(['--profile', '-p']) ?? 'web',
+        id: valueOf(['--id', '-i']) ?? '',
       })
       printLogs(result)
       print(result)

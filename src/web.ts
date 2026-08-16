@@ -11,7 +11,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { PackageManager } from './manager.ts'
 import type {
-  AdapterInitRequest, InstallRequest, RestoreRequest, SyncRequest, UninstallRequest,
+  AdapterInitRequest, InstallRequest, PackageManagerConfig, RestoreRequest, SyncRequest, ToggleRequest, UninstallRequest,
 } from './types.ts'
 import type {} from './index.ts'
 
@@ -52,6 +52,13 @@ function handle(manager: PackageManager, apiPrefix: string): Handler {
     const path = subpath(url.pathname, apiPrefix)
     try {
       if (req.method === 'GET' && path === '/state') return send(res, 200, { ok: true, value: manager.state() })
+      if (req.method === 'GET' && path === '/config') return send(res, 200, { ok: true, value: manager.getConfig() })
+      if (req.method === 'POST' && path === '/config') {
+        return dispatch(res, req, body => Promise.resolve(manager.setConfig(body as unknown as PackageManagerConfig)))
+      }
+      if (req.method === 'POST' && path === '/sync-configured') return dispatch(res, req, () => manager.syncConfigured())
+      if (req.method === 'POST' && path === '/disable') return dispatch(res, req, body => manager.disable(body as unknown as ToggleRequest))
+      if (req.method === 'POST' && path === '/enable') return dispatch(res, req, body => manager.enable(body as unknown as ToggleRequest))
       if (req.method === 'POST' && path === '/restart/clear') {
         assertCsrf(req)
         manager.clearRestartMarker()

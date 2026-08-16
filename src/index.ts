@@ -45,6 +45,12 @@ export class PackageManagerService extends Service {
     super(ctx, 'packageManager')
     this.apiPrefix = config.apiPrefix
     this.manager = new PackageManager(config.home === '' ? {} : { home: config.home })
+    const managerConfig = this.manager.getConfig()
+    if (managerConfig.autoSync && managerConfig.storagePath !== '') {
+      void this.manager.syncConfigured().catch((error: unknown) => {
+        ctx.logger('package-manager').warn('package-manager auto-sync failed: %s', messageOf(error))
+      })
+    }
   }
 }
 
@@ -55,4 +61,8 @@ export class PackageManagerService extends Service {
  */
 export function apply(ctx: Context, config: Config): void {
   ctx.plugin(PackageManagerService, config)
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

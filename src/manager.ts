@@ -6,21 +6,22 @@
  * @module @dsh-ext/dsh-package-manager/manager
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import YAML from 'yaml'
 import { builtinInstallSteps, isGitSpec, probeBundleDir } from './adapters/builtin-bundle.ts'
 import { loadCustomAdapter, runCustomInstall, scaffoldCustomAdapter } from './adapters/custom.ts'
 import { getEntry, listEntries, loadLedger, removeEntry, saveLedger, setEntry } from './ledger.ts'
 import { cacheRoot, pmRoot, profileDir, resolveHome } from './paths.ts'
+import { loadConfig, loadDisabled, removeDisabledEntry, saveConfig, saveDisabled, upsertDisabledEntry } from './config.ts'
 import { ensureProfile, listProfiles, readManifest } from './profile.ts'
 import { defaultGitRunner, detectSourceKind, materializeSource, type GitRunner } from './source.ts'
 import { parseRequirements, planRestore, resolveAdapterDir, fingerprint } from './spec.ts'
 import { defaultCommandRunner, defaultPnpmRunner, StepExecutor, type CommandRunner, type PnpmRunner } from './steps.ts'
 import type {
-  AdapterContext, AdapterInitRequest, AdapterInitResult, InstallRequest, InstallResult, Ledger,
-  LedgerEntry, ManagerState, OperationLog, PlanAction, RestoreRequest, RestoreResult, SpecEntry,
-  StepRecord, SyncRequest, UninstallRequest, UninstallResult,
+  AdapterContext, AdapterInitRequest, AdapterInitResult, DisabledEntry, InstallRequest, InstallResult, Ledger,
+  LedgerEntry, ManagerState, OperationLog, PackageManagerConfig, PlanAction, RestoreRequest, RestoreResult, SpecEntry,
+  StepRecord, SyncRequest, ToggleRequest, UninstallRequest, UninstallResult,
 } from './types.ts'
 
 export interface PackageManagerOptions {
@@ -62,6 +63,8 @@ export class PackageManager {
       restartNeeded: existsSync(this.restartMarker()),
       profiles,
       entries: listEntries(loadLedger(this.home)),
+      disabled: loadDisabled(this.home),
+      config: loadConfig(this.home),
     }
   }
 
@@ -134,9 +137,11 @@ export class PackageManager {
         installedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         spec: { source, adapter: request.adapter, adapterDir: request.adapterDir ?? '', ref },
+        allowBuild,
       }
       setEntry(ledger, entry)
       saveLedger(this.home, ledger)
+      this.clearDisabled(profile, id)
       this.touchRestart()
       log('info', `installed ${id} in profile ${profile} (${records.length} steps recorded)`)
       return { profile, id, adapter: resolved.kind, packageName, steps: records, logs, dryRun: false }
@@ -246,6 +251,90 @@ export class PackageManager {
     })
   }
 
+  /** Persistent preferences: local requirements storage, remote URL, auto sync. */
+  getConfig(): PackageManagerConfig {
+    return loadConfig(this.home)
+  }
+
+  /** Validate and persist manager preferences. */
+  setConfig(config: PackageManagerConfig): PackageManagerConfig {
+    return saveConfig(this.home, config)
+  }
+
+  /** Clone/pull the configured requirements repo, then restore its default deps.yaml. */
+  async syncConfigured(): Promise<RestoreResult> {
+    const config = this.getConfig()
+    const storage = config.storagePath.trim()
+    if (storage === '') throw new Error('package-manager storage path is not configured')
+    const repo = resolve(storage)
+    if (config.remoteUrl !== '') {
+      if (!existsSync(join(repo, '.git'))) {
+        if (existsSync(repo) && readdirSync(repo).length > 0) {
+          throw new Error(`package storage path is not empty and is not a git checkout: ${repo}`)
+        }
+        const parent = dirname(repo)
+        mkdirSync(parent, { recursive: true })
+        mkdirSync(repo, { recursive: true })
+        const clone = this.git(['clone', '--quiet', config.remoteUrl, repo], parent)
+        if (clone.exitCode !== 0) throw new Error(`git clone failed (exit ${clone.exitCode}): ${clone.stderr || clone.stdout}`)
+      } else {
+        const remote = this.git(['remote', 'get-url', 'origin'], repo)
+        if (remote.exitCode !== 0) {
+          const add = this.git(['remote', 'add', 'origin', config.remoteUrl], repo)
+          if (add.exitCode !== 0) throw new Error(`git remote add failed (exit ${add.exitCode}): ${add.stderr || add.stdout}`)
+        } else if (remote.stdout.trim() !== config.remoteUrl) {
+          const set = this.git(['remote', 'set-url', 'origin', config.remoteUrl], repo)
+          if (set.exitCode !== 0) throw new Error(`git remote set-url failed (exit ${set.exitCode}): ${set.stderr || set.stdout}`)
+        }
+      }
+    }
+    if (!existsSync(join(repo, '.git'))) throw new Error(`package storage path is not a git checkout: ${repo}`)
+    const pulled = this.git(['pull', '--ff-only'], repo)
+    if (pulled.exitCode !== 0) throw new Error(`git pull failed (exit ${pulled.exitCode}): ${pulled.stderr || pulled.stdout}`)
+    const file = join(repo, 'requirements', DEPS_FILENAME)
+    if (!existsSync(file)) throw new Error(`requirements file not found: ${file}`)
+    return this.restore({ file })
+  }
+
+  /** Switch a plugin off: remember its request, then uninstall it. */
+  async disable(request: ToggleRequest): Promise<UninstallResult> {
+    const { profile, id } = request
+    const entry = getEntry(loadLedger(this.home), profile, id)
+    if (entry === undefined) throw new Error(`plugin ${JSON.stringify(id)} is not installed in profile ${JSON.stringify(profile)}`)
+    const disabled: DisabledEntry = {
+      profile,
+      id,
+      source: entry.source,
+      adapter: entry.adapter,
+      adapterDir: entry.adapterDir,
+      ref: entry.ref,
+      allowBuild: entry.allowBuild ?? entry.steps.some(step => step.kind === 'profile.allowBuild.add'),
+    }
+    const alreadyDisabled = loadDisabled(this.home).some(item => item.profile === profile && item.id === id)
+    upsertDisabledEntry(this.home, disabled)
+    try {
+      return await this.uninstall({ profile, id })
+    } catch (error) {
+      if (!alreadyDisabled) removeDisabledEntry(this.home, profile, id)
+      throw error
+    }
+  }
+
+  /** Switch a disabled plugin back on by replaying its remembered request. */
+  async enable(request: ToggleRequest): Promise<InstallResult> {
+    const disabled = loadDisabled(this.home).find(item => item.profile === request.profile && item.id === request.id)
+    if (disabled === undefined) throw new Error(`plugin ${JSON.stringify(request.id)} is not disabled in profile ${JSON.stringify(request.profile)}`)
+    return this.install({
+      profile: disabled.profile,
+      id: disabled.id,
+      source: disabled.source,
+      adapter: disabled.adapter,
+      ...(disabled.adapterDir === '' ? {} : { adapterDir: disabled.adapterDir }),
+      ...(disabled.ref === '' ? {} : { ref: disabled.ref }),
+      allowBuild: disabled.allowBuild,
+    })
+  }
+
   /** Analyze a source and scaffold a requirements entry + adapter for it. */
   adapterInit(request: AdapterInitRequest): AdapterInitResult {
     const logs: OperationLog[] = []
@@ -341,6 +430,10 @@ export class PackageManager {
     modes[request.profile ?? 'web'] = entries
     doc.modes = modes
     writeFileSync(depsPath, YAML.stringify(doc))
+  }
+
+  private clearDisabled(profile: string, id: string): void {
+    removeDisabledEntry(this.home, profile, id)
   }
 
   private workDir(profile: string, id: string): string {

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -90,6 +91,49 @@ modes:
     expect(readManifest(join(home, 'profiles', 'web')).dependencies?.['fixture-bundle']).toBeUndefined()
   }, 180_000)
 })
+
+  it('switches a plugin off and back on through the disabled store', async () => {
+    const home = tempDir()
+    const fixture = makeBundleFixture(join(home, 'fixture'))
+    const manager = createPackageManager({ home })
+    await manager.install({ profile: 'web', id: 'fixture', source: fixture, adapter: 'dsh-bundle' })
+
+    await manager.disable({ profile: 'web', id: 'fixture' })
+    expect(manager.state().entries.map(entry => entry.id)).toEqual([])
+    expect(manager.state().disabled.map(entry => entry.id)).toEqual(['fixture'])
+
+    await manager.enable({ profile: 'web', id: 'fixture' })
+    expect(manager.state().entries.map(entry => entry.id)).toEqual(['fixture'])
+    expect(manager.state().disabled).toEqual([])
+
+    await manager.uninstall({ profile: 'web', id: 'fixture' })
+  }, 120_000)
+
+  it('clones and restores the configured requirements repo via syncConfigured', async () => {
+    const home = tempDir()
+    const fixture = makeBundleFixture(join(home, 'fixture'))
+    const remote = join(home, 'remote-repo')
+    mkdirSync(join(remote, 'requirements'), { recursive: true })
+    writeFileSync(join(remote, 'requirements', 'deps.yaml'), `version: 1
+modes:
+  web:
+    - id: fixture
+      source: ${fixture}
+      adapter: dsh-bundle
+`)
+    execFileSync('git', ['init', '-q'], { cwd: remote })
+    execFileSync('git', ['add', '.'], { cwd: remote })
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init'], { cwd: remote })
+
+    const local = join(home, 'local-repo')
+    const manager = createPackageManager({ home })
+    manager.setConfig({ storagePath: local, remoteUrl: remote, autoSync: false })
+    const result = await manager.syncConfigured()
+
+    expect(result.installed.map(item => item.id)).toEqual(['fixture'])
+    expect(existsSync(join(local, 'requirements', 'deps.yaml'))).toBe(true)
+    expect(readManifest(join(home, 'profiles', 'web')).dependencies?.['fixture-bundle']).toBeTruthy()
+  }, 120_000)
 
 describe('PackageManager custom adapter', () => {
   it('installs through a declarative adapter and uninstalls through its recorded inverse', async () => {

@@ -30,6 +30,8 @@ export interface LedgerEntry {
   resolvedCommit: string
   /** Installed steps with their inverse actions, oldest first. Uninstall replays inverses LIFO. */
   steps: StepRecord[]
+  /** Whether the original install request allowed pnpm build scripts. */
+  allowBuild?: boolean
   /** Change-detection fingerprint of the spec that produced this install. */
   spec: SpecFingerprint
   installedAt: string
@@ -107,12 +109,40 @@ export interface OperationLog {
   message: string
 }
 
+/** Persistent package-manager preferences for the requirements repo. */
+export interface PackageManagerConfig {
+  /** Local directory holding the requirements repo (empty = not configured). */
+  storagePath: string
+  /** Git remote used to clone/pull the requirements repo (empty = local only). */
+  remoteUrl: string
+  /** Pull + restore the configured repo automatically when the service mounts. */
+  autoSync: boolean
+}
+
+/** A plugin that was turned off: uninstalled but remembered so it can be switched back on. */
+export interface DisabledEntry {
+  profile: string
+  id: string
+  source: string
+  adapter: 'dsh-bundle' | 'custom'
+  adapterDir: string
+  ref: string
+  allowBuild: boolean
+}
+
+export interface ToggleRequest {
+  profile: string
+  id: string
+}
+
 /** Read-only state view the Web UI renders. */
 export interface ManagerState {
   home: string
   restartNeeded: boolean
   profiles: ProfileState[]
   entries: LedgerEntry[]
+  disabled: DisabledEntry[]
+  config: PackageManagerConfig
 }
 
 export interface ProfileState {

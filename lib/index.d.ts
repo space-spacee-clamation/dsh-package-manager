@@ -31,6 +31,8 @@ interface LedgerEntry {
   resolvedCommit: string;
   /** Installed steps with their inverse actions, oldest first. Uninstall replays inverses LIFO. */
   steps: StepRecord[];
+  /** Whether the original install request allowed pnpm build scripts. */
+  allowBuild?: boolean;
   /** Change-detection fingerprint of the spec that produced this install. */
   spec: SpecFingerprint;
   installedAt: string;
@@ -99,12 +101,37 @@ interface OperationLog {
   level: 'info' | 'warn' | 'error';
   message: string;
 }
+/** Persistent package-manager preferences for the requirements repo. */
+interface PackageManagerConfig {
+  /** Local directory holding the requirements repo (empty = not configured). */
+  storagePath: string;
+  /** Git remote used to clone/pull the requirements repo (empty = local only). */
+  remoteUrl: string;
+  /** Pull + restore the configured repo automatically when the service mounts. */
+  autoSync: boolean;
+}
+/** A plugin that was turned off: uninstalled but remembered so it can be switched back on. */
+interface DisabledEntry {
+  profile: string;
+  id: string;
+  source: string;
+  adapter: 'dsh-bundle' | 'custom';
+  adapterDir: string;
+  ref: string;
+  allowBuild: boolean;
+}
+interface ToggleRequest {
+  profile: string;
+  id: string;
+}
 /** Read-only state view the Web UI renders. */
 interface ManagerState {
   home: string;
   restartNeeded: boolean;
   profiles: ProfileState[];
   entries: LedgerEntry[];
+  disabled: DisabledEntry[];
+  config: PackageManagerConfig;
 }
 interface ProfileState {
   name: string;
@@ -239,10 +266,21 @@ declare class PackageManager {
   uninstall(request: UninstallRequest): Promise<UninstallResult>;
   restore(request: RestoreRequest): Promise<RestoreResult>;
   sync(request: SyncRequest): Promise<RestoreResult>;
+  /** Persistent preferences: local requirements storage, remote URL, auto sync. */
+  getConfig(): PackageManagerConfig;
+  /** Validate and persist manager preferences. */
+  setConfig(config: PackageManagerConfig): PackageManagerConfig;
+  /** Clone/pull the configured requirements repo, then restore its default deps.yaml. */
+  syncConfigured(): Promise<RestoreResult>;
+  /** Switch a plugin off: remember its request, then uninstall it. */
+  disable(request: ToggleRequest): Promise<UninstallResult>;
+  /** Switch a disabled plugin back on by replaying its remembered request. */
+  enable(request: ToggleRequest): Promise<InstallResult>;
   /** Analyze a source and scaffold a requirements entry + adapter for it. */
   adapterInit(request: AdapterInitRequest): AdapterInitResult;
   private resolveAdapter;
   private writeDepsEntry;
+  private clearDisabled;
   private workDir;
   private restartMarker;
   private touchRestart;
@@ -279,4 +317,4 @@ declare class PackageManagerService extends Service {
  */
 declare function apply(ctx: Context, config: Config): void;
 //#endregion
-export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, Config, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, type ManagerState, type OperationLog, PackageManager, type PackageManagerOptions, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestoreRequest, type RestoreResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type UninstallRequest, type UninstallResult, apply, createPackageManager, idFromSource, name };
+export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, Config, type DisabledEntry, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, type ManagerState, type OperationLog, PackageManager, type PackageManagerConfig, type PackageManagerOptions, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestoreRequest, type RestoreResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type ToggleRequest, type UninstallRequest, type UninstallResult, apply, createPackageManager, idFromSource, name };

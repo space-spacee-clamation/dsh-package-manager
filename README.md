@@ -22,6 +22,12 @@
   HTTP 接口共用同一个 core。
 - **可移植 adapter**：adapter 使用 `${DSH_HOME}` / `${DSH_PROFILE}` /
   `${DSH_WORKDIR}` 占位符，可在机器和用户之间复用。
+- **包存储与自动同步**：设置界面可直接配置本地 requirements 仓库路径和
+  远程 URL；开启后服务启动时自动 clone / pull 并 restore。
+- **开关功能**：每个插件可“关闭”（按记录卸载但记住原安装参数），之后可
+  一键重新打开；彻底删除仍走卸载按钮。
+- **开发者模式**：设置界面可切换开发者模式，显示原始 state、`ref` 输入和
+  API 清单。
 
 ## 构建产物
 
@@ -108,6 +114,10 @@ restore        --file <requirements.yaml> [--modes a,b] [--dry-run]
 sync           --repo <path> [--file <requirements.yaml>] [--modes a,b] [--dry-run]
 adapter-init   --source <spec> --id <id> --out-dir <dir>
                [--profile web] [--ref <ref>]
+config         [--storage-path <dir>] [--remote-url <url>] [--auto-sync]
+sync-configured
+disable        --profile <name> --id <id>
+enable         --profile <name> --id <id>
 ```
 
 示例：
@@ -117,8 +127,12 @@ dpm state
 dpm install --profile web --source github:owner/repo --adapter auto --dry-run
 dpm install --profile web --source github:owner/repo --allow-build
 dpm uninstall --profile web --id repo
+dpm disable --profile web --id repo
+dpm enable --profile web --id repo
 dpm adapter-init --source https://github.com/o/r.git --id r --out-dir .
 dpm sync --repo . --modes web,headless --dry-run
+dpm config --storage-path D:\dsh-profiles --remote-url ssh://git@gitlab.example.com/group/profile.git --auto-sync
+dpm sync-configured
 ```
 
 ## Web API
@@ -128,11 +142,16 @@ dpm sync --repo . --modes web,headless --dry-run
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/pm-api/state` | 读取 `home/profiles/entries/restartNeeded` |
+| `GET` | `/pm-api/state` | 读取 home / profiles / entries / disabled / config |
+| `GET` | `/pm-api/config` | 读取包存储与自动同步配置 |
+| `POST` | `/pm-api/config` | 保存包存储与自动同步配置 |
 | `POST` | `/pm-api/install` | 安装插件 |
 | `POST` | `/pm-api/uninstall` | 卸载插件 |
+| `POST` | `/pm-api/disable` | 关闭插件（记录参数后卸载，可重新打开） |
+| `POST` | `/pm-api/enable` | 重新打开已关闭插件 |
 | `POST` | `/pm-api/restore` | 从 requirements 文件复原 |
 | `POST` | `/pm-api/sync` | 拉取 requirements 仓库并复原 |
+| `POST` | `/pm-api/sync-configured` | 按已保存配置 clone / pull 并复原 |
 | `POST` | `/pm-api/adapter-init` | 探测源码并生成 adapter 骨架 |
 | `POST` | `/pm-api/restart/clear` | 清除“需要重启”提示 |
 
@@ -158,8 +177,12 @@ await manager.install({
   allowBuild: false,
 })
 await manager.uninstall({ profile: 'web', id: 'repo' })
+await manager.disable({ profile: 'web', id: 'repo' })
+await manager.enable({ profile: 'web', id: 'repo' })
 await manager.restore({ file: './requirements/deps.yaml', dryRun: false })
 await manager.sync({ repo: '.', modes: ['web'] })
+manager.setConfig({ storagePath: './profile-repo', remoteUrl: 'ssh://git@host/group/repo.git', autoSync: true })
+await manager.syncConfigured()
 manager.adapterInit({ source: 'github:owner/repo', id: 'repo', outDir: '.' })
 ```
 
@@ -243,6 +266,8 @@ uninstall: []
 | `$DSH_HOME` | harness home；未设置时为 `~/.dsh` |
 | `<home>/profiles/<name>` | profile 目录（package.json、cordis.patch.yml、pnpm-workspace.yaml） |
 | `<home>/package-manager/ledger.json` | 已安装插件 ledger |
+| `<home>/package-manager/config.json` | 包存储路径、远程 URL、自动同步开关 |
+| `<home>/package-manager/disabled.json` | 已关闭插件的原安装参数 |
 | `<home>/package-manager/cache` | clone / 下载 / 备份 scratch 目录 |
 
 ## 开发
@@ -259,4 +284,4 @@ pnpm run build   # 生成 lib/index.js、lib/web.js、lib/client.js 与类型
 
 ## License
 
-BSD-3-Clause（见 `package.json`）。
+[MIT](LICENSE)。

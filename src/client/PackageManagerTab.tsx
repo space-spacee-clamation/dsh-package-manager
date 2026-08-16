@@ -4,16 +4,19 @@
  */
 
 import { useEffect, useState, type CSSProperties, type FormEvent, type ReactElement } from 'react'
-import type { AdapterInitResult, InstallResult, ManagerState, OperationLog, RestoreResult, UninstallResult } from '../types.ts'
+import type {
+  AdapterInitResult, InstallResult, ManagerState, OperationLog, PackageManagerConfig, RestoreResult, UninstallResult,
+} from '../types.ts'
 import type { LocaleKey } from './locales.ts'
 
 export interface PackageManagerTabProps {
   t: (key: LocaleKey) => string
 }
 
-type AnyResult = InstallResult | UninstallResult | RestoreResult | AdapterInitResult
+type AnyResult = InstallResult | UninstallResult | RestoreResult | AdapterInitResult | PackageManagerConfig
 
 const CSRF_HEADER = 'x-dsh-pm'
+const DEVELOPER_MODE_KEY = 'dsh-package-manager.developerMode'
 
 async function api<T>(path: string, body?: unknown): Promise<T> {
   const init: RequestInit = body === undefined
@@ -23,6 +26,10 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
   const payload = await response.json() as { ok: boolean; value?: T; error?: { code: string; message: string } }
   if (!payload.ok) throw new Error(payload.error?.message ?? `HTTP ${response.status}`)
   return payload.value as T
+}
+
+function logsOf(value: AnyResult): OperationLog[] {
+  return 'logs' in value ? value.logs : []
 }
 
 const styles: Record<string, CSSProperties> = {
@@ -43,6 +50,7 @@ const styles: Record<string, CSSProperties> = {
   item: { border: '1px solid var(--dsw-border, rgba(127,127,127,0.25))', borderRadius: 8, padding: 10, display: 'flex', flexDirection: 'column', gap: 6 },
   meta: { fontSize: 12, opacity: 0.8, display: 'flex', gap: 12, flexWrap: 'wrap' },
   error: { color: '#e05a5a', fontSize: 12, whiteSpace: 'pre-wrap' },
+  switch: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, cursor: 'pointer' },
 }
 
 export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
@@ -51,21 +59,34 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
   const [result, setResult] = useState<AnyResult | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [developerMode, setDeveloperMode] = useState(() => {
+    try {
+      return localStorage.getItem(DEVELOPER_MODE_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
 
   const [profile, setProfile] = useState('web')
   const [source, setSource] = useState('')
   const [id, setId] = useState('')
   const [adapter, setAdapter] = useState<'auto' | 'dsh-bundle' | 'custom'>('auto')
   const [adapterDir, setAdapterDir] = useState('')
+  const [ref, setRef] = useState('')
   const [allowBuild, setAllowBuild] = useState(false)
   const [requirementsFile, setRequirementsFile] = useState('')
   const [modes, setModes] = useState('')
   const [repo, setRepo] = useState('')
   const [outDir, setOutDir] = useState('')
 
+  const [storagePath, setStoragePath] = useState('')
+  const [remoteUrl, setRemoteUrl] = useState('')
+  const [autoSync, setAutoSync] = useState(false)
+
   const refresh = async (): Promise<void> => {
     try {
-      setState(await api<ManagerState>('/state'))
+      const next = await api<ManagerState>('/state')
+      setState(next)
       setError('')
     } catch (reason) {
       setError(messageOf(reason))
@@ -73,6 +94,22 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
   }
 
   useEffect(() => { void refresh() }, [])
+
+  useEffect(() => {
+    if (state === null) return
+    setStoragePath(state.config.storagePath)
+    setRemoteUrl(state.config.remoteUrl)
+    setAutoSync(state.config.autoSync)
+  }, [state])
+
+  const setDeveloperModePersistent = (value: boolean): void => {
+    setDeveloperMode(value)
+    try {
+      localStorage.setItem(DEVELOPER_MODE_KEY, value ? '1' : '0')
+    } catch {
+      // Settings pages should not crash when storage is unavailable.
+    }
+  }
 
   const run = async (action: () => Promise<AnyResult>): Promise<void> => {
     setBusy(true)
@@ -82,7 +119,7 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
     try {
       const value = await action()
       setResult(value)
-      setLogs(value.logs ?? [])
+      setLogs(logsOf(value))
       await refresh()
     } catch (reason) {
       setError(messageOf(reason))
@@ -96,6 +133,8 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
   }
 
   const modesList = (): string[] => modes.split(',').map(mode => mode.trim()).filter(mode => mode !== '')
+
+  const configPayload = (): PackageManagerConfig => ({ storagePath, remoteUrl, autoSync })
 
   return (
     <div style={styles.root}>
@@ -121,6 +160,52 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
       {error !== '' && <pre style={styles.error}>{error}</pre>}
 
       <div style={styles.card}>
+        <h3 style={styles.title}>{t('storageTitle')}</h3>
+        <p style={styles.intro}>{t('storageHint')}</p>
+        <div style={styles.row}>
+          <label style={styles.field}>
+            <span style={styles.label}>{t('storagePath')}</span>
+            <input style={styles.input} value={storagePath} onChange={event => setStoragePath(event.target.value)} placeholder="D:\dsh-profiles\default" />
+          </label>
+          <label style={styles.field}>
+            <span style={styles.label}>{t('remoteUrl')}</span>
+            <input style={styles.input} value={remoteUrl} onChange={event => setRemoteUrl(event.target.value)} placeholder="ssh://git@gitlab.example.com:32200/group/profile.git" />
+          </label>
+        </div>
+        <label style={styles.switch}>
+          <input type="checkbox" checked={autoSync} onChange={event => setAutoSync(event.target.checked)} />
+          {t('autoSync')}
+        </label>
+        <div style={styles.row}>
+          <button
+            type="button"
+            style={styles.button}
+            disabled={busy}
+            onClick={() => void run(() => api<PackageManagerConfig>('/config', configPayload()))}
+          >
+            {busy ? t('running') : t('saveConfig')}
+          </button>
+          <button
+            type="button"
+            style={styles.button}
+            disabled={busy || storagePath === '' && remoteUrl === ''}
+            onClick={() => void run(async () => {
+              await api<PackageManagerConfig>('/config', configPayload())
+              return api<RestoreResult>('/sync-configured', {})
+            })}
+          >
+            {busy ? t('running') : t('syncConfigured')}
+          </button>
+        </div>
+      </div>
+
+      <label style={styles.switch}>
+        <input type="checkbox" checked={developerMode} onChange={event => setDeveloperModePersistent(event.target.checked)} />
+        {t('developerMode')}
+      </label>
+      {developerMode && <p style={styles.intro}>{t('developerHint')}</p>}
+
+      <div style={styles.card}>
         <h3 style={styles.title}>{t('installedTitle')}</h3>
         {(state?.entries ?? []).length === 0 && <p style={styles.intro}>{t('empty')}</p>}
         <div style={styles.list}>
@@ -128,14 +213,25 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
             <div key={`${entry.profile}/${entry.id}`} style={styles.item}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
                 <strong>{entry.id}</strong>
-                <button
-                  type="button"
-                  style={{ ...styles.button, ...styles.danger }}
-                  disabled={busy}
-                  onClick={() => void run(() => api<UninstallResult>('/uninstall', { profile: entry.profile, id: entry.id }))}
-                >
-                  {t('uninstall')}
-                </button>
+                <div style={styles.row}>
+                  <label style={styles.switch}>
+                    <input
+                      type="checkbox"
+                      checked
+                      disabled={busy}
+                      onChange={() => void run(() => api<UninstallResult>('/disable', { profile: entry.profile, id: entry.id }))}
+                    />
+                    {t('disable')}
+                  </label>
+                  <button
+                    type="button"
+                    style={{ ...styles.button, ...styles.danger }}
+                    disabled={busy}
+                    onClick={() => void run(() => api<UninstallResult>('/uninstall', { profile: entry.profile, id: entry.id }))}
+                  >
+                    {t('uninstall')}
+                  </button>
+                </div>
               </div>
               <div style={styles.meta}>
                 <span>{entry.profile}</span>
@@ -143,6 +239,35 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
                 <span>{entry.adapter}</span>
                 <span>{entry.steps.length} steps</span>
                 <span>{entry.updatedAt}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={styles.card}>
+        <h3 style={styles.title}>{t('disabledTitle')}</h3>
+        {(state?.disabled ?? []).length === 0 && <p style={styles.intro}>{t('disabledEmpty')}</p>}
+        <div style={styles.list}>
+          {(state?.disabled ?? []).map(item => (
+            <div key={`${item.profile}/${item.id}`} style={styles.item}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                <strong>{item.id}</strong>
+                <label style={styles.switch}>
+                  <input
+                    type="checkbox"
+                    checked={false}
+                    disabled={busy}
+                    onChange={() => void run(() => api<InstallResult>('/enable', { profile: item.profile, id: item.id }))}
+                  />
+                  {t('enable')}
+                </label>
+              </div>
+              <div style={styles.meta}>
+                <span>{item.profile}</span>
+                <span>{item.source}</span>
+                <span>{item.adapter}</span>
+                <span>{item.ref === '' ? 'default ref' : item.ref}</span>
               </div>
             </div>
           ))}
@@ -194,6 +319,12 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
             <input style={styles.input} value={adapterDir} onChange={event => setAdapterDir(event.target.value)} />
           </label>
         )}
+        {developerMode && (
+          <label style={styles.field}>
+            <span style={styles.label}>{t('ref')}</span>
+            <input style={styles.input} value={ref} onChange={event => setRef(event.target.value)} placeholder="main" />
+          </label>
+        )}
         <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
           <input type="checkbox" checked={allowBuild} onChange={event => setAllowBuild(event.target.checked)} />
           {t('allowBuild')}
@@ -206,6 +337,7 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
             onClick={() => void run(() => api<InstallResult>('/install', {
               profile, source, id: id === '' ? undefined : id, adapter,
               adapterDir: adapterDir === '' ? undefined : adapterDir,
+              ref: ref === '' ? undefined : ref,
               allowBuild,
             }))}
           >
@@ -218,6 +350,7 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
             onClick={() => void run(() => api<InstallResult>('/install', {
               profile, source, id: id === '' ? undefined : id, adapter,
               adapterDir: adapterDir === '' ? undefined : adapterDir,
+              ref: ref === '' ? undefined : ref,
               allowBuild, dryRun: true,
             }))}
           >
@@ -231,7 +364,7 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
         <div style={styles.row}>
           <label style={styles.field}>
             <span style={styles.label}>{t('requirementsFile')}</span>
-            <input style={styles.input} value={requirementsFile} onChange={event => setRequirementsFile(event.target.value)} placeholder="D:\\plugins\\requirements\\deps.yaml" />
+            <input style={styles.input} value={requirementsFile} onChange={event => setRequirementsFile(event.target.value)} placeholder="D:\plugins\requirements\deps.yaml" />
           </label>
           <label style={styles.field}>
             <span style={styles.label}>{t('modes')}</span>
@@ -296,11 +429,24 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
           type="submit"
           style={styles.button}
           disabled={busy || source === '' || id === '' || outDir === ''}
-          onClick={() => void run(() => api<AdapterInitResult>('/adapter-init', { source, id, outDir, profile }))}
+          onClick={() => void run(() => api<AdapterInitResult>('/adapter-init', { source, id, outDir, profile, ref: ref === '' ? undefined : ref }))}
         >
           {busy ? t('running') : t('adapterInit')}
         </button>
       </form>
+
+      {developerMode && (
+        <div style={styles.card}>
+          <h3 style={styles.title}>{t('rawState')}</h3>
+          <pre style={styles.log}>{JSON.stringify(state, null, 2)}</pre>
+          <h3 style={styles.title}>API</h3>
+          <pre style={styles.log}>{`GET  /pm-api/state
+POST /pm-api/install | uninstall | restore | sync
+POST /pm-api/config | sync-configured | disable | enable
+POST /pm-api/adapter-init | restart/clear
+Header for POST: x-dsh-pm: 1`}</pre>
+        </div>
+      )}
 
       {(result !== null || logs.length > 0) && (
         <div style={styles.card}>
