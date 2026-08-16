@@ -78,6 +78,7 @@ export class PackageManager {
     return {
       home: this.home,
       workspaceRoot: this.workspaceRoot(),
+      workspaceDefault: defaultWorkspaceRoot(this.home),
       restartNeeded: existsSync(this.restartMarker()),
       profiles,
       entries: listEntries(loadLedger(this.home)),

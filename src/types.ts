@@ -154,6 +154,8 @@ export interface ManagerState {
   home: string
   /** Resolved root of per-plugin workspaces (config.workspaceRoot or the default). */
   workspaceRoot: string
+  /** Default workspace root used when config.workspaceRoot is empty. */
+  workspaceDefault: string
   restartNeeded: boolean
   profiles: ProfileState[]
   entries: LedgerEntry[]

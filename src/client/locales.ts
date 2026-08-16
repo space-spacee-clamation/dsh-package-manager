@@ -2,11 +2,13 @@
 
 export const zh = {
   tab: '包管理',
+  section: '插件工作区',
   intro: '给每个插件一个专属工作区：工作区内有类似 Python .venv 的隔离依赖层。粘贴一个链接，派发给 AI 安装即可。',
   workspaceTitle: '插件工作区（虚拟依赖环境）',
   workspaceHint: '所有插件工作区都放在这个根目录下：<root>/<profile>/<插件>，依赖统一安装到各工作区的 .venv。留空则使用默认位置。',
   workspaceRoot: '插件工作区根目录',
-  workspaceDefault: '当前生效：',
+  workspaceDefault: '当前生效',
+  workspaceUseDefault: '使用默认',
   aiInstallTitle: '从链接安装',
   aiInstallHint: '只需一个链接。包管理器会创建插件工作区和 AI 会话，并让 AI 调用 pm_install 工具完成安装；dsh-bundle 插件支持随时热插拔。',
   dispatchToAi: '派发给 AI 安装',
@@ -64,17 +66,21 @@ export const zh = {
   state: '状态',
   refresh: '刷新',
   env: '隔离 .venv',
+  hotBadge: '热插拔',
+  customBadge: '自定义 adapter',
 } as const
 
 export type LocaleKey = keyof typeof zh
 
 export const en: Record<LocaleKey, string> = {
   tab: 'Packages',
+  section: 'Plugin workspaces',
   intro: 'Every plugin gets a dedicated workspace with an isolated dependency layer like a Python .venv. Paste one link and dispatch it to the AI.',
   workspaceTitle: 'Plugin workspaces (virtual dependency env)',
   workspaceHint: 'All plugin workspaces live under this root: <root>/<profile>/<plugin>, with dependencies installed in each workspace .venv. Leave empty for the default location.',
   workspaceRoot: 'Plugin workspace root',
-  workspaceDefault: 'Currently effective:',
+  workspaceDefault: 'Effective',
+  workspaceUseDefault: 'Use default',
   aiInstallTitle: 'Install from a link',
   aiInstallHint: 'One link is all you need. The manager creates a plugin workspace and an AI session; the AI calls pm_install to finish the job. dsh-bundle plugins hot-plug through Cordis.',
   dispatchToAi: 'Dispatch to AI',
@@ -132,4 +138,6 @@ export const en: Record<LocaleKey, string> = {
   state: 'State',
   refresh: 'Refresh',
   env: 'isolated .venv',
+  hotBadge: 'hot-plug',
+  customBadge: 'custom adapter',
 }

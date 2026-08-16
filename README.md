@@ -41,14 +41,20 @@ dispose 运行时 fiber，再按 ledger 中记录的显式逆操作 LIFO 回滚�
 - **可移植 adapter**：支持 `${DSH_HOME}` / `${DSH_PROFILE}` /
   `${DSH_WORKDIR}` / `${DSH_WORKSPACE}` / `${DSH_PLUGIN_ENV}` 占位符。
 - **开关功能**：插件可“关闭”（记住参数后卸载）并一键重新打开。
+- **设置菜单**：除了 Plugins 下的“包管理”tab，还注册了设置列表一级菜单
+  “插件工作区”，两个入口共用同一个页面。
+- **虚拟环境默认值**：工作区根目录默认
+  `<home>/package-manager/plugin-workspaces`；设置页显示当前生效路径，并可
+  一键“使用默认”。
 - **开发者模式**：直接安装、requirements、sync、adapter 生成等高级表单默认
   隐藏，避免普通用户面对过多字段。
 
 ## 快速开始：从链接安装
 
-1. 打开 DSH **Settings → Plugins → 包管理**。
+1. 打开 DSH **Settings → 插件工作区**（或 **Plugins → 包管理**）。
 2. 可选：设置“插件工作区根目录”。默认是
-   `<home>/package-manager/plugin-workspaces`。
+   `<home>/package-manager/plugin-workspaces`，页面显示当前生效路径并可一键
+   恢复默认。
 3. 粘贴一个链接，例如 `github:owner/dsh-visualize`，点击
    **“派发给 AI 安装”**。
 4. 前端历史记录中会出现新的 AI 会话，并按插件工作区分组。

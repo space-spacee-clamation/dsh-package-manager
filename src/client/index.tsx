@@ -35,12 +35,26 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'package-manager: dictionaries')
 
   const t = ctx.locale.bind(NS)
+  const injectT = (): { t: (key: keyof typeof zh) => string } => ({ t: ctx.locale.bind(NS) })
+
+  // Keep the Plugins-section tab for discoverability…
   ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
     name: 'settings.plugins.tab',
     id: 'package-manager',
     order: 5,
     label: () => t('tab'),
     locale: NS,
-    inject: (): { t: (key: keyof typeof zh) => string } => ({ t: ctx.locale.bind(NS) }),
+    inject: injectT,
+  }, PackageManagerTab))
+
+  // …and add an extra first-class menu in the settings list. The shell
+  // passes `close` for sections; PackageManagerTab deliberately ignores it.
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
+    id: 'package-manager',
+    order: 40,
+    label: () => t('section'),
+    locale: NS,
+    inject: injectT,
   }, PackageManagerTab))
 }
