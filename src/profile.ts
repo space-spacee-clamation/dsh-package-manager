@@ -28,7 +28,8 @@ export interface PnpmWorkspace {
   packages?: string[]
   nodeLinker?: string
   autoInstallPeers?: boolean
-  allowBuilds?: string[]
+  /** pnpm accepts both array and `pkg@version: true` object forms. */
+  allowBuilds?: string[] | Record<string, boolean>
   [key: string]: unknown
 }
 
@@ -167,15 +168,33 @@ export function reconcileBundles(dir: string): BundleReconcileResult {
   return { added, removed: [], changed }
 }
 
-/** Current allowBuilds list ([] when unset). */
+/**
+ * Current allowBuilds as package/selector names. pnpm accepts both the
+ * classic array form and the newer `pkg@version: true` mapping; normalize
+ * either one to an array here.
+ */
 export function readAllowBuilds(dir: string): string[] {
-  return [...(readWorkspace(dir)?.allowBuilds ?? [])]
+  const value = readWorkspace(dir)?.allowBuilds
+  if (Array.isArray(value)) return value.filter(item => typeof item === 'string')
+  if (value !== null && typeof value === 'object') return Object.keys(value as Record<string, unknown>)
+  return []
 }
 
-/** Replace the allowBuilds list wholesale and persist. */
+/**
+ * Replace the allowBuilds set and persist. An object-form source keeps the
+ * object form (keys map to true); otherwise the classic array form is kept.
+ */
 export function writeAllowBuilds(dir: string, packages: string[]): void {
   const workspace = readWorkspace(dir) ?? { packages: ['.'], nodeLinker: 'hoisted', autoInstallPeers: false }
-  workspace.allowBuilds = [...new Set(packages)]
+  const next = [...new Set(packages)]
+  const current = workspace.allowBuilds
+  if (current !== null && typeof current === 'object' && !Array.isArray(current)) {
+    const map: Record<string, true> = {}
+    for (const packageName of next) map[packageName] = true
+    workspace.allowBuilds = map
+  } else {
+    workspace.allowBuilds = next
+  }
   writeWorkspace(dir, workspace)
 }
 

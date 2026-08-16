@@ -69,8 +69,12 @@ export function materializeSource(workDir: string, source: string, ref: string, 
   if (kind === 'git') {
     const github = parseGithubSpec(source)
     const url = github?.url ?? source.replace(/^git\+/, '')
+    const targetRef = github?.ref ?? ref
     const args = ['clone', '--quiet']
-    if ((github?.ref ?? ref) !== '') args.push('--branch', github?.ref ?? ref)
+    if (targetRef !== '') args.push('--branch', targetRef)
+    // Default-branch installs do not need the full history. Full-SHA refs
+    // still need a complete clone (a shallow clone cannot resolve them).
+    if (!/^[0-9a-f]{7,40}$/i.test(targetRef)) args.push('--depth', '1')
     args.push(url, dir)
     const clone = git(args, workDir)
     if (clone.exitCode !== 0) throw new Error(`git clone failed (exit ${clone.exitCode}): ${clone.stderr || clone.stdout}`)

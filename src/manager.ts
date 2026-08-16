@@ -189,7 +189,7 @@ export class PackageManager {
         steps: records,
         installedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        spec: { source, adapter: request.adapter, adapterDir: request.adapterDir ?? '', ref },
+        spec: { source, adapter: request.adapter, adapterDir: request.specAdapterDir ?? request.adapterDir ?? '', ref },
         allowBuild,
       }
 
@@ -329,6 +329,7 @@ export class PackageManager {
             source: entry.source,
             adapter: entry.adapter,
             adapterDir,
+            specAdapterDir: entry.adapterDir,
             ref: entry.ref,
             allowBuild: entry.allowBuild,
           })

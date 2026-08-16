@@ -180,6 +180,11 @@ export interface InstallRequest {
   adapter: 'auto' | 'dsh-bundle' | 'custom'
   /** Required when adapter is custom; resolved against the requirements file when restoring. */
   adapterDir?: string
+  /**
+   * Original requirements-relative adapterDir used for change detection when
+   * restore resolved `adapterDir` to an absolute path.
+   */
+  specAdapterDir?: string
   ref?: string
   allowBuild?: boolean
   dryRun?: boolean

@@ -312,9 +312,7 @@ export class StepExecutor {
       case 'pluginEnv.remove': {
         const path = String(spec.path)
         if (!existsSync(path)) return { ...base, label: `remove plugin env ${path} (absent)`, params: { path }, inverse: { uses: 'noop' } }
-        mkdirSync(backupDir, { recursive: true })
-        const backup = join(backupDir, 'target')
-        renameSync(path, backup)
+        const backup = backupTo(path, backupDir)
         return {
           ...base,
           label: `remove plugin env ${path}`,
@@ -327,9 +325,7 @@ export class StepExecutor {
         const backup = String(spec.backup)
         const to = String(spec.to)
         if (!existsSync(backup)) throw new Error(`pluginEnv.restore backup is missing: ${backup}`)
-        mkdirSync(dirname(to), { recursive: true })
-        rmSync(to, { recursive: true, force: true })
-        renameSync(backup, to)
+        restoreFrom(backup, to)
         return {
           ...base,
           label: `restore plugin env ${to}`,
@@ -373,10 +369,7 @@ export class StepExecutor {
         mkdirSync(dirname(to), { recursive: true })
         const existed = existsSync(to)
         const backup = join(backupDir, 'target')
-        if (existed) {
-          mkdirSync(backupDir, { recursive: true })
-          renameSync(to, backup)
-        }
+        if (existed) backupTo(to, backupDir)
         const directory = statSync(from).isDirectory()
         if (directory) {
           // Recursive copy: the isolated `.venv` install moves a whole source
@@ -406,10 +399,7 @@ export class StepExecutor {
         mkdirSync(dirname(path), { recursive: true })
         const existed = existsSync(path)
         const backup = join(backupDir, 'target')
-        if (existed) {
-          mkdirSync(backupDir, { recursive: true })
-          renameSync(path, backup)
-        }
+        if (existed) backupTo(path, backupDir)
         writeFileSync(path, content)
         return {
           ...base,
@@ -424,9 +414,7 @@ export class StepExecutor {
       case 'file.remove': {
         const path = String(spec.path)
         if (!existsSync(path)) return { ...base, label: `remove ${path} (absent)`, params: { path }, inverse: { uses: 'noop' } }
-        mkdirSync(backupDir, { recursive: true })
-        const backup = join(backupDir, 'target')
-        renameSync(path, backup)
+        const backup = backupTo(path, backupDir)
         return {
           ...base,
           label: `remove ${path}`,
@@ -439,9 +427,7 @@ export class StepExecutor {
         const backup = String(spec.backup)
         const to = String(spec.to)
         if (!existsSync(backup)) throw new Error(`file.restore backup is missing: ${backup}`)
-        mkdirSync(dirname(to), { recursive: true })
-        rmSync(to, { recursive: true, force: true })
-        renameSync(backup, to)
+        restoreFrom(backup, to)
         return {
           ...base,
           label: `restore ${to}`,
@@ -502,6 +488,37 @@ export function addedDependency(
     if (before[key] !== value) return key
   }
   return undefined
+}
+
+/**
+ * Move `path` into `backupDir/target` across filesystem boundaries. `rename`
+ * is preferred; when source and backup live on different drives (EXDEV),
+ * copy + delete preserves the transaction.
+ */
+function backupTo(path: string, backupDir: string): string {
+  mkdirSync(backupDir, { recursive: true })
+  const backup = join(backupDir, 'target')
+  try {
+    renameSync(path, backup)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error
+    cpSync(path, backup, { recursive: true, force: true })
+    rmSync(path, { recursive: true, force: true })
+  }
+  return backup
+}
+
+/** Restore `backup` over `to`, again without assuming both share a drive. */
+function restoreFrom(backup: string, to: string): void {
+  mkdirSync(dirname(to), { recursive: true })
+  rmSync(to, { recursive: true, force: true })
+  try {
+    renameSync(backup, to)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error
+    cpSync(backup, to, { recursive: true, force: true })
+    rmSync(backup, { recursive: true, force: true })
+  }
 }
 
 function envOf(spec: StepSpec): Record<string, string> {
