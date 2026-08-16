@@ -11,9 +11,9 @@
 
 import { spawnSync } from 'node:child_process'
 import {
-  copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync,
+  cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
 } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import {
   readAllowBuilds, readManifest, readWorkspace, reconcileBundles, writeAllowBuilds, writeManifest,
 } from './profile.ts'
@@ -73,6 +73,11 @@ export const STEP_KINDS = new Set([
   'profile.bundles.set',
   'profile.allowBuild.add',
   'profile.allowBuild.set',
+  'pluginEnv.create',
+  'pluginEnv.remove',
+  'pluginEnv.restore',
+  'pluginEnv.allowBuild.add',
+  'pnpm',
   'file.copy',
   'file.write',
   'file.remove',
@@ -87,6 +92,10 @@ const STRING_FIELDS: Record<string, string[]> = {
   'profile.bundles.add': ['package'],
   'profile.bundles.remove': ['package'],
   'profile.allowBuild.add': ['package'],
+  'pluginEnv.create': ['path'],
+  'pluginEnv.remove': ['path'],
+  'pluginEnv.restore': ['backup', 'to'],
+  'pluginEnv.allowBuild.add': ['dir', 'package'],
   'file.copy': ['from', 'to'],
   'file.write': ['path', 'content'],
   'file.remove': ['path'],
@@ -104,6 +113,16 @@ export function validateStepSpec(spec: StepSpec, where: string): void {
     const packages = spec.uses === 'profile.allowBuild.set' ? spec.packages : spec.bundles
     if (!Array.isArray(packages) || packages.some(packageName => typeof packageName !== 'string')) {
       throw new Error(`${where}: ${spec.uses} needs a string array (${spec.uses === 'profile.allowBuild.set' ? 'packages' : 'bundles'})`)
+    }
+    return
+  }
+  if (spec.uses === 'pnpm') {
+    if (!Array.isArray(spec.args) || spec.args.some(arg => typeof arg !== 'string')) {
+      throw new Error(`${where}: pnpm needs a string array field "args"`)
+    }
+    if (typeof spec.cwd !== 'string' || spec.cwd === '') throw new Error(`${where}: pnpm needs string field "cwd"`)
+    if (spec.unargs !== undefined && (!Array.isArray(spec.unargs) || spec.unargs.some(arg => typeof arg !== 'string'))) {
+      throw new Error(`${where}: pnpm.unargs must be a string array`)
     }
     return
   }
@@ -170,7 +189,7 @@ export class StepExecutor {
       case 'profile.dependency.add': {
         const specText = String(spec.spec)
         const before = readManifest(ctx.profileDir).dependencies ?? {}
-        this.runPnpm(['add', specText], ctx)
+        this.runPnpm(['add', specText], ctx.profileDir, ctx)
         const after = readManifest(ctx.profileDir).dependencies ?? {}
         const packageName = addedDependency(before, after)
         if (packageName === undefined) throw new Error(`pnpm add ${JSON.stringify(specText)} reported success but wrote no dependency`)
@@ -182,7 +201,7 @@ export class StepExecutor {
         const packageName = String(spec.packageName)
         const before = readManifest(ctx.profileDir).dependencies ?? {}
         const previousSpec = before[packageName]
-        this.runPnpm(['remove', packageName], ctx)
+        this.runPnpm(['remove', packageName], ctx.profileDir, ctx)
         const label = `pnpm remove ${packageName}`
         return {
           ...base,
@@ -268,13 +287,82 @@ export class StepExecutor {
 
       case 'profile.allowBuild.set': {
         const packages = (spec.packages as string[]).map(packageName => String(packageName))
-        const before = readAllowBuilds(ctx.profileDir)
-        writeAllowBuilds(ctx.profileDir, packages)
+        const dir = typeof spec.dir === 'string' && spec.dir !== '' ? spec.dir : ctx.profileDir
+        const before = readAllowBuilds(dir)
+        writeAllowBuilds(dir, packages)
         return {
           ...base,
           label: `allowBuilds = [${packages.join(', ')}]`,
-          params: { packages, before },
-          inverse: { uses: 'profile.allowBuild.set', packages: before },
+          params: { packages, before, dir },
+          inverse: { uses: 'profile.allowBuild.set', packages: before, dir },
+        }
+      }
+
+      case 'pluginEnv.create': {
+        const path = String(spec.path)
+        mkdirSync(path, { recursive: true })
+        return {
+          ...base,
+          label: `create plugin env ${path}`,
+          params: { path },
+          inverse: { uses: 'pluginEnv.remove', path },
+        }
+      }
+
+      case 'pluginEnv.remove': {
+        const path = String(spec.path)
+        if (!existsSync(path)) return { ...base, label: `remove plugin env ${path} (absent)`, params: { path }, inverse: { uses: 'noop' } }
+        mkdirSync(backupDir, { recursive: true })
+        const backup = join(backupDir, 'target')
+        renameSync(path, backup)
+        return {
+          ...base,
+          label: `remove plugin env ${path}`,
+          params: { path, backup },
+          inverse: { uses: 'pluginEnv.restore', backup, to: path },
+        }
+      }
+
+      case 'pluginEnv.restore': {
+        const backup = String(spec.backup)
+        const to = String(spec.to)
+        if (!existsSync(backup)) throw new Error(`pluginEnv.restore backup is missing: ${backup}`)
+        mkdirSync(dirname(to), { recursive: true })
+        rmSync(to, { recursive: true, force: true })
+        renameSync(backup, to)
+        return {
+          ...base,
+          label: `restore plugin env ${to}`,
+          params: { backup, to },
+          inverse: { uses: 'pluginEnv.remove', path: to },
+        }
+      }
+
+      case 'pluginEnv.allowBuild.add': {
+        const dir = String(spec.dir)
+        const packageName = String(spec.package)
+        const before = readAllowBuilds(dir)
+        if (!before.includes(packageName)) writeAllowBuilds(dir, [...before, packageName])
+        return {
+          ...base,
+          label: `plugin env allowBuilds += ${packageName}`,
+          params: { dir, package: packageName, before },
+          inverse: { uses: 'profile.allowBuild.set', packages: before, dir },
+        }
+      }
+
+      case 'pnpm': {
+        const args = (spec.args as string[]).map(arg => String(arg))
+        const cwd = String(spec.cwd)
+        const unargs = (spec.unargs as string[] | undefined)?.map(arg => String(arg)) ?? []
+        if (args.length > 0) this.runPnpm(args, cwd, ctx)
+        return {
+          ...base,
+          label: `pnpm ${args.join(' ')} (${cwd})`,
+          params: { args, cwd, unargs },
+          inverse: unargs.length === 0
+            ? { uses: 'noop' }
+            : { uses: 'pnpm', args: unargs, cwd },
         }
       }
 
@@ -289,11 +377,23 @@ export class StepExecutor {
           mkdirSync(backupDir, { recursive: true })
           renameSync(to, backup)
         }
-        copyFileSync(from, to)
+        const directory = statSync(from).isDirectory()
+        if (directory) {
+          // Recursive copy: the isolated `.venv` install moves a whole source
+          // tree in one step. `.git` is deliberately not copied — the ledger
+          // already records the resolved commit.
+          cpSync(from, to, {
+            recursive: true,
+            force: true,
+            filter: candidate => basename(candidate) !== '.git' && basename(candidate) !== 'node_modules',
+          })
+        } else {
+          cpSync(from, to)
+        }
         return {
           ...base,
-          label: `copy ${from} -> ${to}`,
-          params: { from, to, existed },
+          label: `copy ${directory ? 'tree' : 'file'} ${from} -> ${to}`,
+          params: { from, to, existed, directory },
           inverse: existed
             ? { uses: 'file.restore', backup, to }
             : { uses: 'file.remove', path: to },
@@ -377,12 +477,12 @@ export class StepExecutor {
     }
   }
 
-  private runPnpm(args: string[], ctx: AdapterContext): void {
-    const result = this.pnpm(args, ctx.profileDir, { PM_PROFILE: ctx.profileDir, PM_HOME: ctx.home })
+  private runPnpm(args: string[], cwd: string, ctx: AdapterContext): void {
+    const result = this.pnpm(args, cwd, { PM_PROFILE: ctx.profileDir, PM_HOME: ctx.home })
     if (result.exitCode !== 0) {
       throw new Error(`pnpm ${args.join(' ')} failed (exit ${result.exitCode}): ${tail(result.stderr || result.stdout)}`)
     }
-    ctx.log('info', `pnpm ${args.join(' ')}`)
+    ctx.log('info', `pnpm ${args.join(' ')} (${cwd})`)
   }
 
   private runCommand(run: string, cwd: string, env: Record<string, string>): void {

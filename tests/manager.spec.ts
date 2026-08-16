@@ -127,7 +127,7 @@ modes:
 
     const local = join(home, 'local-repo')
     const manager = createPackageManager({ home })
-    manager.setConfig({ storagePath: local, remoteUrl: remote, autoSync: false })
+    manager.setConfig({ storagePath: local, remoteUrl: remote, autoSync: false, workspaceRoot: '' })
     const result = await manager.syncConfigured()
 
     expect(result.installed.map(item => item.id)).toEqual(['fixture'])

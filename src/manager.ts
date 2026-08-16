@@ -7,12 +7,13 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import YAML from 'yaml'
 import { builtinInstallSteps, isGitSpec, probeBundleDir } from './adapters/builtin-bundle.ts'
 import { loadCustomAdapter, runCustomInstall, scaffoldCustomAdapter } from './adapters/custom.ts'
 import { getEntry, listEntries, loadLedger, removeEntry, saveLedger, setEntry } from './ledger.ts'
-import { cacheRoot, pmRoot, profileDir, resolveHome } from './paths.ts'
+import { cacheRoot, defaultWorkspaceRoot, pmRoot, profileDir, resolveHome } from './paths.ts'
+import { pluginEnvDir, pluginWorkspaceDir } from './pluginWorkspace.ts'
 import { loadConfig, loadDisabled, removeDisabledEntry, saveConfig, saveDisabled, upsertDisabledEntry } from './config.ts'
 import { ensureProfile, listProfiles, readManifest } from './profile.ts'
 import { defaultGitRunner, detectSourceKind, materializeSource, type GitRunner } from './source.ts'
@@ -20,8 +21,8 @@ import { parseRequirements, planRestore, resolveAdapterDir, fingerprint } from '
 import { defaultCommandRunner, defaultPnpmRunner, StepExecutor, type CommandRunner, type PnpmRunner } from './steps.ts'
 import type {
   AdapterContext, AdapterInitRequest, AdapterInitResult, DisabledEntry, InstallRequest, InstallResult, Ledger,
-  LedgerEntry, ManagerState, OperationLog, PackageManagerConfig, PlanAction, RestoreRequest, RestoreResult, SpecEntry,
-  StepRecord, SyncRequest, ToggleRequest, UninstallRequest, UninstallResult,
+  LedgerEntry, ManagerState, OperationLog, PackageManagerConfig, PackageManagerRuntime, PlanAction, RestoreRequest,
+  RestoreResult, RuntimeMountResult, SpecEntry, StepRecord, SyncRequest, ToggleRequest, UninstallRequest, UninstallResult,
 } from './types.ts'
 
 export interface PackageManagerOptions {
@@ -29,6 +30,8 @@ export interface PackageManagerOptions {
   pnpm?: PnpmRunner
   command?: CommandRunner
   git?: GitRunner
+  /** In-process Cordis hot-plug seam; absent for the CLI and tests. */
+  runtime?: PackageManagerRuntime
 }
 
 const RESTART_MARKER = 'restart-needed'
@@ -38,11 +41,25 @@ export class PackageManager {
   readonly home: string
   private readonly executor: StepExecutor
   private readonly git: GitRunner
+  private readonly runtime: PackageManagerRuntime | undefined
 
   constructor(options: PackageManagerOptions = {}) {
     this.home = options.home ?? resolveHome()
     this.executor = new StepExecutor(options.pnpm ?? defaultPnpmRunner(), options.command ?? defaultCommandRunner())
     this.git = options.git ?? defaultGitRunner()
+    this.runtime = options.runtime
+  }
+
+  /** Resolved root for per-plugin workspaces (config or default). */
+  workspaceRoot(): string {
+    const configured = this.getConfig().workspaceRoot.trim()
+    if (configured === '') return defaultWorkspaceRoot(this.home)
+    return isAbsolute(configured) ? resolve(configured) : resolve(this.home, configured)
+  }
+
+  /** `<workspaceRoot>/<profile>/<safe-id>` for one plugin install. */
+  pluginWorkspaceDir(profile: string, id: string): string {
+    return pluginWorkspaceDir(this.workspaceRoot(), profile, id)
   }
 
   /** Read-only view for the Web UI and CLI. */
@@ -60,6 +77,7 @@ export class PackageManager {
     })
     return {
       home: this.home,
+      workspaceRoot: this.workspaceRoot(),
       restartNeeded: existsSync(this.restartMarker()),
       profiles,
       entries: listEntries(loadLedger(this.home)),
@@ -84,10 +102,25 @@ export class PackageManager {
     const ref = request.ref ?? ''
     const allowBuild = request.allowBuild ?? false
 
+    const workspaceDir = this.pluginWorkspaceDir(profile, id)
+    const envDir = pluginEnvDir(workspaceDir)
+
     if (request.dryRun === true) {
       log('info', `dry run: would install ${JSON.stringify(id)} into profile ${JSON.stringify(profile)} from ${JSON.stringify(source)}`)
+      log('info', `dry run: plugin workspace ${workspaceDir}, isolated env ${envDir}`)
       log('info', `dry run: adapter ${request.adapter}, allowBuild ${String(allowBuild)}`)
-      return { profile, id, adapter: request.adapter, packageName: '', steps: [], logs, dryRun: true }
+      return {
+        profile,
+        id,
+        adapter: request.adapter,
+        packageName: '',
+        pluginEnvDir: envDir,
+        workspaceDir,
+        hotMounted: false,
+        steps: [],
+        logs,
+        dryRun: true,
+      }
     }
 
     const ledger = loadLedger(this.home)
@@ -97,7 +130,16 @@ export class PackageManager {
 
     const kind = detectSourceKind(source)
     const workDir = this.workDir(profile, id)
-    const ctx: AdapterContext = { home: this.home, profileDir: dir, workDir, source, ref, log }
+    const ctx: AdapterContext = {
+      home: this.home,
+      profileDir: dir,
+      workDir,
+      workspaceDir,
+      pluginEnvDir: envDir,
+      source,
+      ref,
+      log,
+    }
 
     let records: StepRecord[] = []
     try {
@@ -107,16 +149,22 @@ export class PackageManager {
       log('info', `adapter: ${resolved.kind}${resolved.reason === '' ? '' : ` (${resolved.reason})`}`)
 
       if (resolved.kind === 'dsh-bundle') {
-        const steps = builtinInstallSteps(
-          { source, ref, allowBuild, packageName, executor: this.executor },
-          ctx,
-        )
+        const steps = builtinInstallSteps({
+          source,
+          sourceKind: kind,
+          ref,
+          allowBuild,
+          packageName,
+          pluginEnvDir: envDir,
+          workDir,
+          executor: this.executor,
+        })
         records = await this.executor.run(steps, ctx, join(workDir, 'backups'))
       } else {
         if (resolved.adapterDir === '') {
           throw new Error(`plugin ${JSON.stringify(id)} needs a custom adapter but none was provided — run adapter-init to scaffold one`)
         }
-        const adapter = loadCustomAdapter(resolved.adapterDir, ctx)
+        const adapter = loadCustomAdapter(resolved.adapterDir, this.adapterVars(ctx))
         records = await runCustomInstall(
           { adapter, executor: this.executor, backupRoot: join(workDir, 'backups') },
           ctx,
@@ -125,6 +173,7 @@ export class PackageManager {
       const entry: LedgerEntry = {
         id,
         profile,
+        profileDir: dir,
         source,
         sourceKind: kind,
         ref,
@@ -133,18 +182,43 @@ export class PackageManager {
         packageName,
         materializedDir: materialized?.dir ?? '',
         resolvedCommit: materialized?.resolvedCommit ?? '',
+        workDir,
+        workspaceDir,
+        pluginEnvDir: envDir,
         steps: records,
         installedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         spec: { source, adapter: request.adapter, adapterDir: request.adapterDir ?? '', ref },
         allowBuild,
       }
+
+      // Cordis hot-plug: a dsh-bundle package is already linked in the
+      // profile's node_modules, so import + ctx.plugin() mounts it NOW.
+      // Uninstall disposes the same fiber before replaying inverse steps.
+      let runtime: RuntimeMountResult = { mounted: false, reason: 'no in-process runtime (CLI/tests)' }
+      if (resolved.kind === 'dsh-bundle' && this.runtime !== undefined && packageName !== '') {
+        runtime = await this.runtime.mount(entry)
+        if (runtime.mounted) log('info', `hot-mounted ${packageName} through Cordis`)
+        else log('warn', `live mount skipped: ${runtime.reason}`)
+      }
+
       setEntry(ledger, entry)
       saveLedger(this.home, ledger)
       this.clearDisabled(profile, id)
-      this.touchRestart()
+      if (!runtime.mounted) this.touchRestart()
       log('info', `installed ${id} in profile ${profile} (${records.length} steps recorded)`)
-      return { profile, id, adapter: resolved.kind, packageName, steps: records, logs, dryRun: false }
+      return {
+        profile,
+        id,
+        adapter: resolved.kind,
+        packageName,
+        pluginEnvDir: envDir,
+        workspaceDir,
+        hotMounted: runtime.mounted,
+        steps: records,
+        logs,
+        dryRun: false,
+      }
     } catch (error) {
       const message = buildScriptHint(source, allowBuild, error)
       try {
@@ -166,16 +240,39 @@ export class PackageManager {
     }
     if (request.dryRun === true) {
       log('info', `dry run: would uninstall ${entry.id} from profile ${entry.profile} (${entry.steps.length} inverse steps)`)
-      return { profile: entry.profile, id: entry.id, steps: [], logs, dryRun: true }
+      return { profile: entry.profile, id: entry.id, hotUnmounted: false, steps: [], logs, dryRun: true }
     }
     const dir = profileDir(this.home, entry.profile)
-    const freshWorkDir = entry.materializedDir === ''
-    const workDir = freshWorkDir ? this.workDir(entry.profile, entry.id) : dirname(entry.materializedDir)
-    const ctx: AdapterContext = { home: this.home, profileDir: dir, workDir, source: entry.source, ref: entry.ref, log }
+    const workDir = entry.workDir !== undefined && entry.workDir !== '' && existsSync(entry.workDir)
+      ? entry.workDir
+      : entry.materializedDir === ''
+        ? this.workDir(entry.profile, entry.id)
+        : dirname(entry.materializedDir)
+    const ctx: AdapterContext = {
+      home: this.home,
+      profileDir: dir,
+      workDir,
+      ...(entry.workspaceDir === undefined ? {} : { workspaceDir: entry.workspaceDir }),
+      ...(entry.pluginEnvDir === undefined ? {} : { pluginEnvDir: entry.pluginEnvDir }),
+      source: entry.source,
+      ref: entry.ref,
+      log,
+    }
+
+    // Time compositionality: dispose the live Cordis fiber BEFORE replaying the
+    // inverse effects that remove its files. Failed hot-unmount keeps the
+    // ledger untouched so uninstall can be retried.
+    let runtime: RuntimeMountResult = { mounted: false, reason: 'no in-process runtime' }
+    if (entry.adapter === 'dsh-bundle' && this.runtime !== undefined && entry.packageName !== '') {
+      runtime = await this.runtime.unmount(entry)
+      if (runtime.mounted) log('info', `hot-unmounted ${entry.packageName} through Cordis`)
+      else log('warn', `live unmount skipped: ${runtime.reason}`)
+    }
+
     try {
       await this.executor.rollback(entry.steps, ctx, join(workDir, 'backups'))
       if (entry.adapter === 'custom' && entry.adapterDir !== '') {
-        const adapter = loadCustomAdapter(entry.adapterDir, ctx)
+        const adapter = loadCustomAdapter(entry.adapterDir, this.adapterVars(ctx))
         const extra = adapter.uninstall ?? []
         if (extra.length > 0) {
           await this.executor.run(extra, ctx, join(workDir, 'extra-backups'))
@@ -188,9 +285,16 @@ export class PackageManager {
     removeEntry(ledger, entry.profile, entry.id)
     saveLedger(this.home, ledger)
     rmSync(workDir, { recursive: true, force: true })
-    this.touchRestart()
+    if (!runtime.mounted) this.touchRestart()
     log('info', `uninstalled ${entry.id} from profile ${entry.profile}`)
-    return { profile: entry.profile, id: entry.id, steps: entry.steps, logs, dryRun: false }
+    return {
+      profile: entry.profile,
+      id: entry.id,
+      hotUnmounted: runtime.mounted,
+      steps: entry.steps,
+      logs,
+      dryRun: false,
+    }
   }
 
   async restore(request: RestoreRequest): Promise<RestoreResult> {
@@ -434,6 +538,16 @@ export class PackageManager {
 
   private clearDisabled(profile: string, id: string): void {
     removeDisabledEntry(this.home, profile, id)
+  }
+
+  private adapterVars(ctx: AdapterContext) {
+    return {
+      home: ctx.home,
+      profileDir: ctx.profileDir,
+      workDir: ctx.workDir,
+      ...(ctx.workspaceDir === undefined ? {} : { workspaceDir: ctx.workspaceDir }),
+      ...(ctx.pluginEnvDir === undefined ? {} : { pluginEnvDir: ctx.pluginEnvDir }),
+    }
   }
 
   private workDir(profile: string, id: string): string {

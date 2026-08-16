@@ -31,6 +31,8 @@ adapter 加载时，在解析相对路径之前展开以下占位符：
 | `${DSH_HOME}` | harness home（`$DSH_HOME` 或 `~/.dsh`） |
 | `${DSH_PROFILE}` | 当前 profile 目录 `<home>/profiles/<name>` |
 | `${DSH_WORKDIR}` | 本次安装的工作目录；git/file 源码被 materialize 到 `<workdir>/source` |
+| `${DSH_WORKSPACE}` | 插件专属工作区（AI 会话 cwd） |
+| `${DSH_PLUGIN_ENV}` | 工作区内的隔离依赖层 `<workspace>/.venv` |
 
 `env` 映射中的字符串值同样会展开。未知的 `${NAME}` 保持不变，交给 shell
 处理。请始终用这些占位符表达 home/profile/workdir，不要写死绝对路径。
@@ -52,8 +54,13 @@ adapter 加载时，在解析相对路径之前展开以下占位符：
 | `profile.bundles.reconcile` | | 按已安装依赖自动补充 bundle 声明 |
 | `profile.bundles.set` | `bundles: string[]` | 整体替换 bundle 列表 |
 | `profile.allowBuild.add` | `package` | 把包名追加到 pnpm `allowBuilds` |
-| `profile.allowBuild.set` | `packages: string[]` | 整体替换 allowBuilds |
-| `file.copy` | `from`, `to` | 复制单个文件（不是目录） |
+| `profile.allowBuild.set` | `packages: string[]`, `dir?` | 整体替换 allowBuilds；`dir` 缺省为 profile 目录 |
+| `pluginEnv.create` | `path` | 创建隔离 `.venv` 目录；逆操作为整体移除 |
+| `pluginEnv.remove` | `path` | 把目录移入备份（内部逆操作） |
+| `pluginEnv.restore` | `backup`, `to` | 从备份恢复目录（内部逆操作） |
+| `pluginEnv.allowBuild.add` | `dir`, `package` | 把包名追加到指定目录的 pnpm `allowBuilds` |
+| `pnpm` | `args: string[]`, `cwd`, `unargs?: string[]` | 在 `cwd` 执行 `pnpm <args>`；`unargs` 为空时逆操作为 noop（由 `.venv` 整体移除兜底） |
+| `file.copy` | `from`, `to` | 复制文件或整个目录（目录复制会排除 `.git`） |
 | `file.write` | `path`, `content` | 写入文本文件 |
 | `file.remove` | `path` | 删除文件或目录；缺失视为成功 |
 | `file.restore` | `backup`, `to` | 从备份恢复到目标（内部逆操作） |
@@ -67,8 +74,8 @@ adapter 加载时，在解析相对路径之前展开以下占位符：
 
 - 包管理器不信任单独编写的 uninstall 脚本：每个 `install` step 在执行时
   记录显式 inverse。
-- `file.copy`/`file.write` 会备份被覆盖的旧文件；不存在的新文件则逆操作为
-  `file.remove`。
+- `file.copy`/`file.write` 会备份被覆盖的旧文件或旧目录；不存在的新目标则
+  逆操作为 `file.remove`。
 - `command` 的逆操作是交换 `run` 与 `unrun` 的 `command`。
 - 失败回滚按 LIFO 执行，任一逆操作失败仍继续清扫其余步骤，最后汇总报错。
 - `uninstall` 段仅在已记录逆操作全部重放后执行，适合放额外清理。
@@ -77,5 +84,6 @@ adapter 加载时，在解析相对路径之前展开以下占位符：
 
 - 自定义 adapter 中优先复用包管理器已经 materialize 到
   `${DSH_WORKDIR}/source` 的源码，避免再 clone 一次。
+- 把插件依赖放进 `${DSH_PLUGIN_ENV}`；不要把全局依赖直接写进 profile。
 - 验证用 `check` + `node -e` 或平台无关命令；不要写 `rmdir /s /q` 这类
   绑定单个平台的逆命令。

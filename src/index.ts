@@ -10,7 +10,10 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { dispatchAiInstall } from './ai.ts'
 import { PackageManager } from './manager.ts'
+import { CordisRuntime } from './runtime.ts'
+import type { AiInstallRequest, AiInstallResult } from './types.ts'
 
 export { PackageManager, createPackageManager, idFromSource, type PackageManagerOptions } from './manager.ts'
 export type * from './types.ts'
@@ -44,13 +47,23 @@ export class PackageManagerService extends Service {
   constructor(ctx: Context, config: Config) {
     super(ctx, 'packageManager')
     this.apiPrefix = config.apiPrefix
-    this.manager = new PackageManager(config.home === '' ? {} : { home: config.home })
+    this.manager = new PackageManager({
+      ...(config.home === '' ? {} : { home: config.home }),
+      runtime: new CordisRuntime(ctx),
+    })
     const managerConfig = this.manager.getConfig()
     if (managerConfig.autoSync && managerConfig.storagePath !== '') {
-      void this.manager.syncConfigured().catch((error: unknown) => {
+      // Defer one microtask so the service (and its Cordis runtime) is fully
+      // constructed before syncConfigured starts hot-mounting plugins.
+      void Promise.resolve().then(() => this.manager.syncConfigured()).catch((error: unknown) => {
         ctx.logger('package-manager').warn('package-manager auto-sync failed: %s', messageOf(error))
       })
     }
+  }
+
+  /** Create an AI session in one plugin workspace and dispatch installation. */
+  dispatchAiInstall(request: AiInstallRequest): Promise<AiInstallResult> {
+    return dispatchAiInstall(this.ctx, this.manager, request)
   }
 }
 

@@ -21,7 +21,7 @@ const CLIENT_EXTERNALS: readonly string[] = [
 
 export default [
   {
-    entry: { index: 'src/index.ts', web: 'src/web.ts' },
+    entry: { index: 'src/index.ts', web: 'src/web.ts', tools: 'src/tools.ts' },
     outDir: 'lib',
     format: ['esm'],
     platform: 'node',
@@ -30,7 +30,15 @@ export default [
     dts: true,
     clean: true,
     deps: {
-      neverBundle: ['@deepseek-ai/schemastery', '@deepseek-ai/cordis'],
+      neverBundle: [
+        '@deepseek-ai/schemastery',
+        '@deepseek-ai/cordis',
+        '@deepseek-ai/dsh-agent',
+        '@deepseek-ai/dsh-llm',
+        '@deepseek-ai/dsh-session',
+        '@deepseek-ai/dsh-tools',
+        '@deepseek-ai/dsh-workspace',
+      ],
     },
   },
   {

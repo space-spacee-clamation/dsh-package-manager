@@ -1,6 +1,6 @@
 {
   "name": "@dsh-ext/dsh-package-manager",
-  "description": "DSH package manager plugin: install/uninstall plugins from git or local sources with wrapped installers and uninstallers, restore plugin sets and profile modes from a requirements file, and manage everything from the Web settings Plugins tab.",
+  "description": "DSH package manager plugin: install/uninstall plugins into configurable per-plugin workspaces with isolated .venv dependency layers, hot-plug dsh-bundle plugins through Cordis, dispatch installation to an AI session, and restore plugin sets from a requirements file.",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -20,7 +20,11 @@
     },
     "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./tools": {
+      "types": "./lib/tools.d.ts",
+      "default": "./lib/tools.js"
+    }
   },
   "files": [
     "lib",
@@ -51,7 +55,12 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/schemastery": "^3.18.1"
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@deepseek-ai/dsh-agent": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-session": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-workspace": "^0.1.0-rc.6"
   },
   "dependencies": {
     "yaml": "^2.8.0"
@@ -71,7 +80,12 @@
     "react-dom": "^18.2.0",
     "tsdown": "^0.22.2",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.1"
+    "vitest": "^4.1.1",
+    "@deepseek-ai/dsh-agent": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-llm": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-session": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-workspace": "0.1.0-rc.6"
   },
   "license": "MIT"
 }

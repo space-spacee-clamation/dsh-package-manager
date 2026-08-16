@@ -1,10 +1,15 @@
 # dsh-package-manager bundle: mounts the package-manager core service (any
-# profile) plus the web-only /pm-api route carrier. The web row waits on both
-# the core service and webServer, so headless profiles keep the core active
-# while the HTTP half simply never mounts there.
+# profile), the AI tool row (only where `tools` exists), plus the web-only
+# /pm-api route carrier. The web row waits on both the core service and
+# webServer, so headless profiles keep the core active while the HTTP half
+# simply never mounts there.
 - insert:
     - id: package-manager
       name: '@dsh-ext/dsh-package-manager'
+
+    - id: package-manager-tools
+      name: '@dsh-ext/dsh-package-manager/tools'
+      inject: [packageManager, tools]
 
     - id: package-manager-web
       name: '@dsh-ext/dsh-package-manager/web'

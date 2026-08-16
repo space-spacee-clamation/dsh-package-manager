@@ -31,12 +31,18 @@ export interface AdapterVariables {
   profileDir?: string
   /** Per-install scratch directory (holds the materialized source); expands `${DSH_WORKDIR}`. */
   workDir?: string
+  /** Per-plugin workspace (the AI session cwd); expands `${DSH_WORKSPACE}`. */
+  workspaceDir?: string
+  /** Isolated dependency layer inside the workspace; expands `${DSH_PLUGIN_ENV}`. */
+  pluginEnvDir?: string
 }
 
 const ADAPTER_VARIABLES: Record<string, keyof AdapterVariables> = {
   DSH_HOME: 'home',
   DSH_PROFILE: 'profileDir',
   DSH_WORKDIR: 'workDir',
+  DSH_WORKSPACE: 'workspaceDir',
+  DSH_PLUGIN_ENV: 'pluginEnvDir',
 }
 
 /** Load and validate one adapter.yaml. */
@@ -95,8 +101,9 @@ export async function runCustomInstall(options: CustomInstallOptions, ctx: Adapt
 
 /**
  * Expand adapter placeholders (`${DSH_HOME}`, `${DSH_PROFILE}`,
- * `${DSH_WORKDIR}`) in string fields and `env` values. Unknown `${NAME}`
- * placeholders are left untouched so shell-owned variables keep working.
+ * `${DSH_WORKDIR}`, `${DSH_WORKSPACE}`, `${DSH_PLUGIN_ENV}`) in string fields
+ * and `env` values. Unknown `${NAME}` placeholders are left untouched so
+ * shell-owned variables keep working.
  */
 export function expandStepVariables(spec: StepSpec, vars: AdapterVariables): StepSpec {
   const expand = (value: string): string => value.replace(/\$\{([A-Z0-9_]+)\}/g, (token, name: string) => {
@@ -140,7 +147,7 @@ export function scaffoldCustomAdapter(dir: string, id: string, reason: string): 
   const adapter: CustomAdapter = {
     id,
     install: [
-      { uses: 'file.copy', from: `\${DSH_WORKDIR}/source/README.md`, to: `\${DSH_HOME}/plugins/${id}/README.md` },
+      { uses: 'file.copy', from: `\${DSH_WORKDIR}/source/README.md`, to: `\${DSH_PLUGIN_ENV}/README.md` },
       { uses: 'command', run: `# TODO: installer command`, unrun: `# TODO: uninstaller command` },
     ],
     verify: [{ uses: 'check', run: `# TODO: verify the plugin is installed (exit 0 = ok)` }],

@@ -14,6 +14,8 @@ interface LedgerEntry {
   id: string;
   /** Profile (mode) this entry is installed into. */
   profile: string;
+  /** Absolute profile directory the dependency was linked into. */
+  profileDir?: string;
   /** The spec the install was requested with (verbatim, user supplied). */
   source: string;
   sourceKind: SourceKind;
@@ -27,6 +29,12 @@ interface LedgerEntry {
   packageName: string;
   /** Absolute materialized source directory (clone or local copy), empty when the source is a bare npm name. */
   materializedDir: string;
+  /** Absolute scratch directory that owns this install's backups (clone, rollback storage). */
+  workDir?: string;
+  /** Absolute per-plugin workspace (the AI session cwd; contains .venv). */
+  workspaceDir?: string;
+  /** Absolute isolated dependency layer inside workspaceDir (the plugin ".venv"). */
+  pluginEnvDir?: string;
   /** Resolved git commit, empty for file/npm sources. */
   resolvedCommit: string;
   /** Installed steps with their inverse actions, oldest first. Uninstall replays inverses LIFO. */
@@ -109,6 +117,12 @@ interface PackageManagerConfig {
   remoteUrl: string;
   /** Pull + restore the configured repo automatically when the service mounts. */
   autoSync: boolean;
+  /**
+   * Root for per-plugin workspaces. Each install lives in
+   * `<workspaceRoot>/<profile>/<id>` with its isolated `.venv` dependency
+   * layer. Empty means `<home>/package-manager/plugin-workspaces`.
+   */
+  workspaceRoot: string;
 }
 /** A plugin that was turned off: uninstalled but remembered so it can be switched back on. */
 interface DisabledEntry {
@@ -127,6 +141,8 @@ interface ToggleRequest {
 /** Read-only state view the Web UI renders. */
 interface ManagerState {
   home: string;
+  /** Resolved root of per-plugin workspaces (config.workspaceRoot or the default). */
+  workspaceRoot: string;
   restartNeeded: boolean;
   profiles: ProfileState[];
   entries: LedgerEntry[];
@@ -187,6 +203,12 @@ interface InstallResult {
   id: string;
   adapter: string;
   packageName: string;
+  /** Absolute isolated dependency layer (`.venv`) created for this install. */
+  pluginEnvDir: string;
+  /** Absolute plugin workspace owning the dependency layer. */
+  workspaceDir: string;
+  /** True when the plugin was mounted live through Cordis (no restart needed). */
+  hotMounted: boolean;
   steps: StepRecord[];
   logs: OperationLog[];
   dryRun: boolean;
@@ -203,6 +225,8 @@ interface RestoreResult {
 interface UninstallResult {
   profile: string;
   id: string;
+  /** True when the live Cordis fiber was disposed before inverse replay. */
+  hotUnmounted: boolean;
   steps: StepRecord[];
   logs: OperationLog[];
   dryRun: boolean;
@@ -227,9 +251,44 @@ interface AdapterContext {
   profileDir: string;
   /** Per-install scratch directory (clones, downloads, backups). */
   workDir: string;
+  /** Per-plugin workspace (the AI session cwd); contains `.venv`. */
+  workspaceDir?: string;
+  /** Isolated dependency layer inside workspaceDir (the plugin ".venv"). */
+  pluginEnvDir?: string;
   source: string;
   ref: string;
   log: (level: OperationLog['level'], message: string) => void;
+}
+/** In-process Cordis hot-plug seam used by the Service, mocked by tests/CLI. */
+interface PackageManagerRuntime {
+  /** Import and `ctx.plugin()` a freshly installed dsh-bundle entry. */
+  mount(entry: LedgerEntry): Promise<RuntimeMountResult>;
+  /** Dispose the live fiber (or all fibers of the module) before inverse replay. */
+  unmount(entry: LedgerEntry): Promise<RuntimeMountResult>;
+}
+interface RuntimeMountResult {
+  mounted: boolean;
+  reason: string;
+}
+/** Minimal request from the simplified settings tab: one link, dispatch to AI. */
+interface AiInstallRequest {
+  /** Source spec: github:owner/repo, git URL, npm name, or local path. */
+  source: string;
+  /** Target profile; defaults to web (or the first available profile). */
+  profile?: string;
+  /** Optional explicit session id, mostly for tests. */
+  sessionId?: string;
+}
+/** Result returned by /pm-api/ai-install. The session is already live and attached. */
+interface AiInstallResult {
+  profile: string;
+  id: string;
+  source: string;
+  workspaceId: string;
+  workspacePath: string;
+  sessionId: string;
+  /** First user message sent to the new agent. */
+  prompt: string;
 }
 /** Spawn result shared by every runner. */
 interface SpawnResult {
@@ -252,12 +311,19 @@ interface PackageManagerOptions {
   pnpm?: PnpmRunner;
   command?: CommandRunner;
   git?: GitRunner;
+  /** In-process Cordis hot-plug seam; absent for the CLI and tests. */
+  runtime?: PackageManagerRuntime;
 }
 declare class PackageManager {
   readonly home: string;
   private readonly executor;
   private readonly git;
+  private readonly runtime;
   constructor(options?: PackageManagerOptions);
+  /** Resolved root for per-plugin workspaces (config or default). */
+  workspaceRoot(): string;
+  /** `<workspaceRoot>/<profile>/<safe-id>` for one plugin install. */
+  pluginWorkspaceDir(profile: string, id: string): string;
   /** Read-only view for the Web UI and CLI. */
   state(): ManagerState;
   /** Remove the restart hint (the Web UI calls this once the user acknowledged it). */
@@ -281,6 +347,7 @@ declare class PackageManager {
   private resolveAdapter;
   private writeDepsEntry;
   private clearDisabled;
+  private adapterVars;
   private workDir;
   private restartMarker;
   private touchRestart;
@@ -309,6 +376,8 @@ declare class PackageManagerService extends Service {
   readonly manager: PackageManager;
   readonly apiPrefix: string;
   constructor(ctx: Context, config: Config);
+  /** Create an AI session in one plugin workspace and dispatch installation. */
+  dispatchAiInstall(request: AiInstallRequest): Promise<AiInstallResult>;
 }
 /**
  * Mount the service.
@@ -317,4 +386,4 @@ declare class PackageManagerService extends Service {
  */
 declare function apply(ctx: Context, config: Config): void;
 //#endregion
-export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, Config, type DisabledEntry, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, type ManagerState, type OperationLog, PackageManager, type PackageManagerConfig, type PackageManagerOptions, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestoreRequest, type RestoreResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type ToggleRequest, type UninstallRequest, type UninstallResult, apply, createPackageManager, idFromSource, name };
+export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, type AiInstallRequest, type AiInstallResult, Config, type DisabledEntry, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, type ManagerState, type OperationLog, PackageManager, type PackageManagerConfig, type PackageManagerOptions, type PackageManagerRuntime, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestoreRequest, type RestoreResult, type RuntimeMountResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type ToggleRequest, type UninstallRequest, type UninstallResult, apply, createPackageManager, idFromSource, name };

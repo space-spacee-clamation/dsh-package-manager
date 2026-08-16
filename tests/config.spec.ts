@@ -21,10 +21,10 @@ afterEach(() => {
 describe('package-manager config store', () => {
   it('returns defaults and persists normalized config', () => {
     const home = tempDir()
-    expect(loadConfig(home)).toEqual({ storagePath: '', remoteUrl: '', autoSync: false })
+    expect(loadConfig(home)).toEqual({ storagePath: '', remoteUrl: '', autoSync: false, workspaceRoot: '' })
 
-    const config = saveConfig(home, { storagePath: 'repo', remoteUrl: 'https://example.com/r.git', autoSync: true })
-    expect(config).toEqual({ storagePath: 'repo', remoteUrl: 'https://example.com/r.git', autoSync: true })
+    const config = saveConfig(home, { storagePath: 'repo', remoteUrl: 'https://example.com/r.git', autoSync: true, workspaceRoot: '' })
+    expect(config).toEqual({ storagePath: 'repo', remoteUrl: 'https://example.com/r.git', autoSync: true, workspaceRoot: '' })
     expect(loadConfig(home)).toEqual(config)
     expect(configPath(home)).toContain('config.json')
   })

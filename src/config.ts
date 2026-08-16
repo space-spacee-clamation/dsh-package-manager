@@ -19,6 +19,7 @@ export const DEFAULT_PACKAGE_CONFIG: PackageManagerConfig = {
   storagePath: '',
   remoteUrl: '',
   autoSync: false,
+  workspaceRoot: '',
 }
 
 export function configPath(home: string): string {
@@ -38,10 +39,15 @@ export function normalizeConfig(value: unknown): PackageManagerConfig {
   const storagePath = raw.storagePath
   const remoteUrl = raw.remoteUrl
   const autoSync = raw.autoSync
+  const workspaceRoot = raw.workspaceRoot
   if (typeof storagePath !== 'string') throw new Error('package-manager config: storagePath must be a string')
   if (typeof remoteUrl !== 'string') throw new Error('package-manager config: remoteUrl must be a string')
   if (typeof autoSync !== 'boolean') throw new Error('package-manager config: autoSync must be a boolean')
-  return { storagePath, remoteUrl, autoSync }
+  // Backward-compatible: config files written before workspaceRoot existed keep the default.
+  if (workspaceRoot !== undefined && typeof workspaceRoot !== 'string') {
+    throw new Error('package-manager config: workspaceRoot must be a string')
+  }
+  return { storagePath, remoteUrl, autoSync, workspaceRoot: workspaceRoot ?? '' }
 }
 
 /** Read the manager config, returning defaults when no file exists yet. */

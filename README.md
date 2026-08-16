@@ -1,43 +1,142 @@
 # dsh-package-manager
 
-`@dsh-ext/dsh-package-manager` 是 DSH 的插件包管理器：从 git / 本地目录 / npm
-安装插件，用 `requirements/deps.yaml` 声明并复原整套 profile（模式），所有安装
-与卸载都由内置或自定义 adapter 包装，并带事务回滚。
+`@dsh-ext/dsh-package-manager` 是 DSH 的插件包管理器。每个插件拥有一个可配置的
+专属工作区，工作区内是类似 Python `.venv` 的隔离依赖层；设置页只需粘贴一个
+链接并“派发给 AI 安装”。`dsh-bundle` 插件通过 Cordis 热挂载/热卸载，卸载时先
+dispose 运行时 fiber，再按 ledger 中记录的显式逆操作 LIFO 回滚。
 
-> DSH plugin package manager. Installs plugins from git / local / npm, restores
-> whole profile modes from a requirements file, and wraps every install and
-> uninstall with a built-in or declarative custom adapter.
+> DSH plugin package manager. Every plugin gets a configurable workspace with a
+> `.venv`-style isolated dependency layer; the settings tab takes one link and
+> dispatches the install to an AI session. dsh-bundle plugins hot-plug through
+> Cordis, and uninstall replays recorded inverse steps LIFO.
+
+## 设计对应关系
+
+实现直接对应 DSH/Cordis 论文第 7 章相关工作中的两条主线：
+
+- **7.3 时间组合性 / revertible effect**：每个安装 step 在运行时生成显式
+  `inverse`；失败与卸载都按 LIFO 重放，不依赖单独的卸载脚本。
+- **7.4 空间组合性 / reactive coeffect**：profile 是插件的上下文；插件装在
+  自己的 `.venv` 中，profile 只声明最小依赖，并由 Cordis fiber 负责挂载和
+  dispose。
+
+完整映射见 [docs/cordis-design.md](docs/cordis-design.md)。
 
 ## 功能
 
-- **安装 / 卸载**：`dsh-bundle` 插件走 `pnpm add/remove` + bundle 列表同步；
-  普通仓库可生成自定义 adapter。
+- **插件工作区 + `.venv`**：每个插件位于
+  `<workspaceRoot>/<profile>/<id>`，依赖只进入其 `.venv`，profile 仅保存一个
+  `link:` 依赖。
+- **AI 安装**：设置页只填一个链接。服务创建插件工作区、注册
+  `workspaceRegistry`、创建 `cwd` 为该工作区的 agent session 并 attach；会话
+  会通过宿主事件流自动出现在前端历史记录中。
+- **随时热插拔**：`dsh-bundle` 插件安装成功后立即 `ctx.plugin()` 挂载；卸载
+  时先 dispose fiber，再回放逆操作。常规安装/卸载无需重启。
+- **事务与回滚**：安装失败按 LIFO 回滚；卸载重放 ledger，不信任单独维护的
+  卸载脚本。
 - **requirements 复原**：`deps.yaml` 声明每个 mode 应有的插件，`restore`
   按 `id` 计算 `install / keep / update / uninstall` 最小差集。
-- **git 同步**：`sync` 先 `git pull --ff-only` requirements 仓库，再执行
-  restore；第三方依赖在 restore 时自动 clone。
-- **事务与回滚**：每一步都记录显式逆操作；安装失败按 LIFO 回滚；卸载重放
-  记录，不依赖单独维护的卸载脚本。
-- **CLI + Web + API**：`dpm` 命令、Settings → Plugins 页面、`/pm-api/*`
-  HTTP 接口共用同一个 core。
-- **可移植 adapter**：adapter 使用 `${DSH_HOME}` / `${DSH_PROFILE}` /
-  `${DSH_WORKDIR}` 占位符，可在机器和用户之间复用。
-- **包存储与自动同步**：设置界面可直接配置本地 requirements 仓库路径和
-  远程 URL；开启后服务启动时自动 clone / pull 并 restore。
-- **开关功能**：每个插件可“关闭”（按记录卸载但记住原安装参数），之后可
-  一键重新打开；彻底删除仍走卸载按钮。
-- **开发者模式**：设置界面可切换开发者模式，显示原始 state、`ref` 输入和
-  API 清单。
+- **git 同步**：`sync` 先 `git pull --ff-only`，再执行 restore。
+- **CLI + Web + API**：`dpm`、`/pm-api/*` 和程序化 API 共用同一 core。
+- **可移植 adapter**：支持 `${DSH_HOME}` / `${DSH_PROFILE}` /
+  `${DSH_WORKDIR}` / `${DSH_WORKSPACE}` / `${DSH_PLUGIN_ENV}` 占位符。
+- **开关功能**：插件可“关闭”（记住参数后卸载）并一键重新打开。
+- **开发者模式**：直接安装、requirements、sync、adapter 生成等高级表单默认
+  隐藏，避免普通用户面对过多字段。
 
-## 构建产物
+## 快速开始：从链接安装
 
-| 路径 | 内容 |
-| --- | --- |
-| `lib/index.js` / `lib/index.d.ts` | Node 侧：`PackageManagerService`、core API、类型 |
-| `lib/web.js` / `lib/web.d.ts` | Web 路由：在 `webServer` 上挂载 `/pm-api/*` |
-| `lib/client.js` | 浏览器侧：Settings 的 Plugins 标签页 |
-| `bin/dpm.mjs` | 独立 CLI |
-| `cordis.patch.yml` | bundle patch：注入 `package-manager` 与 `package-manager-web` 两个 loader 行 |
+1. 打开 DSH **Settings → Plugins → 包管理**。
+2. 可选：设置“插件工作区根目录”。默认是
+   `<home>/package-manager/plugin-workspaces`。
+3. 粘贴一个链接，例如 `github:owner/dsh-visualize`，点击
+   **“派发给 AI 安装”**。
+4. 前端历史记录中会出现新的 AI 会话，并按插件工作区分组。
+5. AI 调用 `pm_install` 完成安装：
+
+   - `dsh-bundle` 插件立即热挂载，无需重启；
+   - 需要自定义 adapter 的插件，AI 会调用 `pm_scaffold` 生成骨架，补全后
+     继续调用 `pm_install`。
+
+对应 HTTP 调用：
+
+```bash
+curl -X POST http://localhost:<port>/pm-api/ai-install \
+  -H 'content-type: application/json' \
+  -H 'x-dsh-pm: 1' \
+  -d '{"source":"github:owner/dsh-visualize"}'
+```
+
+响应：
+
+```json
+{
+  "ok": true,
+  "value": {
+    "profile": "web",
+    "id": "dsh-visualize",
+    "source": "github:owner/dsh-visualize",
+    "workspaceId": "…",
+    "workspacePath": "<workspaceRoot>/web/dsh-visualize",
+    "sessionId": "session-…",
+    "prompt": "你是 DSH 插件工作区的安装智能体…"
+  }
+}
+```
+
+## 插件工作区与配置
+
+默认布局：
+
+```text
+<workspaceRoot>/<profile>/<safe-id>/
+  .venv/                  # 隔离依赖层：源码快照 + pnpm 依赖
+  requirements/           # AI 生成的自定义 adapter（如有）
+  package-manager.json    # 工作区 manifest：profile/id/source
+  AGENTS.md               # 给 AI 会话的任务说明（AI 派发时写入）
+```
+
+- `workspaceRoot` 空 = `<home>/package-manager/plugin-workspaces`。
+- 相对路径按 `$DSH_HOME` 解析。
+- profile 的 `package.json` 只出现 `link:<...>.venv` 形式的依赖；
+  不会把第三方依赖树直接写进 profile。
+- `config.json` 示例：
+
+```json
+{
+  "workspaceRoot": "D:/dsh-plugin-workspaces",
+  "storagePath": "D:/dsh-profiles/default",
+  "remoteUrl": "ssh://git@gitlab.example.com/group/profile.git",
+  "autoSync": true
+}
+```
+
+## dsh-bundle 安装顺序
+
+对声明了 `dsh.bundle.patch` 的插件：
+
+```text
+materialize source
+  -> probe dsh.bundle.patch
+  -> copy source into <workspace>/.venv        (git/file)
+     或 create .venv linker project + pnpm add (npm)
+  -> pnpm install inside .venv
+  -> profile.dependency.add link:<.venv>
+  -> profile.bundles.reconcile
+  -> import(packageName) + ctx.plugin(package)  ← 热挂载
+```
+
+卸载顺序：
+
+```text
+dispose Cordis fiber
+  -> LIFO replay inverse steps
+  -> remove .venv / profile link / bundle entry
+  -> remove ledger entry
+```
+
+只有无法热挂载的路径会写 restart marker：custom adapter、CLI 独立进程、模块
+导入失败或插件依赖未满足。
 
 ## 安装到 DSH profile
 
@@ -49,7 +148,7 @@
 pnpm add github:space-spacee-clamation/dsh-package-manager
 ```
 
-或直接编辑 `<home>/profiles/<name>/package.json`：
+或编辑 `<home>/profiles/<name>/package.json`：
 
 ```json
 {
@@ -64,8 +163,14 @@ pnpm add github:space-spacee-clamation/dsh-package-manager
 }
 ```
 
-然后重新 `pnpm install` 并重启 DSH。包自带 `dsh.bundle.patch`，若由本包管理器
-安装，安装完成后会自动 reconcile 进 `dsh.profile.bundles`。
+重新 `pnpm install` 并启动 DSH。包自带的 `dsh.bundle.patch` 会注入三个
+loader 行：
+
+```text
+package-manager        核心服务（所有 profile 可用）
+package-manager-tools  注册 pm_install / pm_scaffold（依赖 tools 服务）
+package-manager-web    挂载 /pm-api/*（依赖 webServer）
+```
 
 **方式 B：本地开发链接**
 
@@ -73,18 +178,18 @@ pnpm add github:space-spacee-clamation/dsh-package-manager
 pnpm add "link:/path/to/dsh-package-manager"
 ```
 
-本地开发时可直接运行 `node bin/dpm.mjs ...`，无需发布。
+本地开发可直接执行 `node bin/dpm.mjs ...`。
 
-## 快速开始：建立 requirements 仓库
+## requirements 仓库
 
 requirements 仓库只提交声明和自定义 adapter，不提交第三方依赖本体。
 
 ```bash
-# 1. 为一个新插件生成 entry 与 adapter 骨架
+# 1. 为新插件生成 entry 与 adapter 骨架
 dpm adapter-init --source github:owner/repo --id my-plugin --out-dir .
 
-# 2. 自定义插件编辑 ./requirements/adapters/my-plugin/adapter.yaml
-#    dsh-bundle 插件无需 adapter
+# 2. dsh-bundle 无需 adapter；其他插件编辑
+#    ./requirements/adapters/my-plugin/adapter.yaml
 
 # 3. 预演
 dpm restore --file ./requirements/deps.yaml --dry-run
@@ -92,7 +197,7 @@ dpm restore --file ./requirements/deps.yaml --dry-run
 # 4. 复原
 dpm restore --file ./requirements/deps.yaml
 
-# 5. 日常使用：拉取 requirements 仓库后自动同步
+# 5. 拉取 requirements 仓库并同步
 git clone <requirements-repo-url> profile-repo
 cd profile-repo
 dpm sync --repo .
@@ -102,10 +207,10 @@ dpm sync --repo .
 
 ## CLI
 
-`dpm` 在包安装后由 `bin` 暴露；未安装时可执行 `node bin/dpm.mjs`。
+`dpm` 在包安装后由 `bin` 暴露；未安装时执行 `node bin/dpm.mjs`。
 
 ```text
-state          查看 home / profiles / ledger 条目
+state          查看 home / workspaceRoot / profiles / ledger 条目
 install        --profile <name> --source <spec> [--id <id>]
                [--adapter auto|dsh-bundle|custom] [--adapter-dir <dir>]
                [--ref <ref>] [--allow-build] [--dry-run]
@@ -114,7 +219,8 @@ restore        --file <requirements.yaml> [--modes a,b] [--dry-run]
 sync           --repo <path> [--file <requirements.yaml>] [--modes a,b] [--dry-run]
 adapter-init   --source <spec> --id <id> --out-dir <dir>
                [--profile web] [--ref <ref>]
-config         [--storage-path <dir>] [--remote-url <url>] [--auto-sync]
+config         [--workspace-root <dir>] [--storage-path <dir>]
+               [--remote-url <url>] [--auto-sync]
 sync-configured
 disable        --profile <name> --id <id>
 enable         --profile <name> --id <id>
@@ -131,22 +237,24 @@ dpm disable --profile web --id repo
 dpm enable --profile web --id repo
 dpm adapter-init --source https://github.com/o/r.git --id r --out-dir .
 dpm sync --repo . --modes web,headless --dry-run
-dpm config --storage-path D:\dsh-profiles --remote-url ssh://git@gitlab.example.com/group/profile.git --auto-sync
+dpm config --workspace-root D:\dsh-plugin-workspaces \
+  --storage-path D:\dsh-profiles \
+  --remote-url ssh://git@gitlab.example.com/group/profile.git --auto-sync
 dpm sync-configured
 ```
 
 ## Web API
 
-核心路由默认挂在 `apiPrefix`（默认 `/pm-api`）。所有写操作需要请求头
-`x-dsh-pm: 1`（同源客户端防护）。
+默认前缀 `/pm-api`。所有写操作需要请求头 `x-dsh-pm: 1`（同源客户端防护）。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/pm-api/state` | 读取 home / profiles / entries / disabled / config |
-| `GET` | `/pm-api/config` | 读取包存储与自动同步配置 |
-| `POST` | `/pm-api/config` | 保存包存储与自动同步配置 |
-| `POST` | `/pm-api/install` | 安装插件 |
-| `POST` | `/pm-api/uninstall` | 卸载插件 |
+| `GET` | `/pm-api/state` | 读取 home / workspaceRoot / profiles / entries / disabled / config |
+| `GET` | `/pm-api/config` | 读取工作区根目录、包存储与自动同步配置 |
+| `POST` | `/pm-api/config` | 保存配置（`PackageManagerConfig`） |
+| `POST` | `/pm-api/ai-install` | 创建插件工作区 + AI 会话并派发安装（`AiInstallRequest`） |
+| `POST` | `/pm-api/install` | 安装插件（`InstallRequest`） |
+| `POST` | `/pm-api/uninstall` | 卸载插件（`UninstallRequest`） |
 | `POST` | `/pm-api/disable` | 关闭插件（记录参数后卸载，可重新打开） |
 | `POST` | `/pm-api/enable` | 重新打开已关闭插件 |
 | `POST` | `/pm-api/restore` | 从 requirements 文件复原 |
@@ -155,17 +263,39 @@ dpm sync-configured
 | `POST` | `/pm-api/adapter-init` | 探测源码并生成 adapter 骨架 |
 | `POST` | `/pm-api/restart/clear` | 清除“需要重启”提示 |
 
-请求体与 `InstallRequest / UninstallRequest / RestoreRequest / SyncRequest /
-AdapterInitRequest` 对应，响应统一为：
+统一响应：
 
 ```json
 { "ok": true, "value": { } }
 ```
 
+`/pm-api/ai-install` 请求体：
+
+```json
+{ "source": "github:owner/repo", "profile": "web" }
+```
+
+## AI 工具
+
+`package-manager-tools` 行注册两个全局工具：
+
+### `pm_install`
+
+- 只接受包管理器自己创建的插件工作区会话调用；
+- 来源固定从工作区 `package-manager.json` 读取，不接受模型任意指定 URL；
+- 参数：`adapter`、`adapterDir`、`ref`、`allowBuild`；
+- 安装在本进程内执行，因此 `dsh-bundle` 插件能真正热挂载。
+
+### `pm_scaffold`
+
+- 为没有 `dsh.bundle.patch` 的插件生成 `requirements/deps.yaml` 与
+  `requirements/adapters/<id>/adapter.yaml`；
+- AI 补全 adapter 后再次调用 `pm_install`，传入 `adapterDir`。
+
 ## Programmatic API
 
 ```ts
-import { createPackageManager } from '@dsh-ext/dsh-package-manager'
+import { createPackageManager, PackageManagerService } from '@dsh-ext/dsh-package-manager'
 
 const manager = createPackageManager({ home: '/path/to/dsh-home' })
 
@@ -181,17 +311,24 @@ await manager.disable({ profile: 'web', id: 'repo' })
 await manager.enable({ profile: 'web', id: 'repo' })
 await manager.restore({ file: './requirements/deps.yaml', dryRun: false })
 await manager.sync({ repo: '.', modes: ['web'] })
-manager.setConfig({ storagePath: './profile-repo', remoteUrl: 'ssh://git@host/group/repo.git', autoSync: true })
+manager.setConfig({
+  workspaceRoot: '',
+  storagePath: './profile-repo',
+  remoteUrl: 'ssh://git@host/group/repo.git',
+  autoSync: true,
+})
 await manager.syncConfigured()
 manager.adapterInit({ source: 'github:owner/repo', id: 'repo', outDir: '.' })
 ```
 
-导出：`PackageManager`、`createPackageManager`、`idFromSource`、
-`PackageManagerService`、`Config` 及全部 wire 类型。
+- `createPackageManager()`：纯 core，适合 CLI、脚本和测试；不会热挂载，会写
+  restart marker。
+- `PackageManagerService`：在 Cordis Context 中创建 service，自动携带
+  `CordisRuntime`，因此 Web UI 和 AI 工具路径支持热插拔。
+- 导出：`PackageManager`、`createPackageManager`、`idFromSource`、
+  `PackageManagerService`、`Config` 及全部 wire 类型。
 
 ## source spec
-
-`source` 支持以下写法：
 
 | 写法 | 示例 | 类型 |
 | --- | --- | --- |
@@ -200,8 +337,9 @@ manager.adapterInit({ source: 'github:owner/repo', id: 'repo', outDir: '.' })
 | npm 包名 | `some-pkg`、`@scope/pkg`、`npm:...` | npm |
 | 本地目录 | `./repo`、`D:\src\repo`、`file:...`、`link:...` | file |
 
-`--ref` 可固定 git 分支 / tag / commit。git 源默认不会自动允许 pnpm build
-script；遇到 build script 错误时按提示重跑并加 `--allow-build`。
+`--ref` 可固定 git 分支 / tag / commit。git 源默认不自动允许 pnpm build
+script；遇到 build script 错误时按提示重跑并加 `--allow-build`。允许列表写在
+插件 `.venv` 的 pnpm-workspace 中，卸载时撤销。
 
 ## requirements 仓库布局
 
@@ -238,21 +376,26 @@ modes:
 
 ## 自定义 adapter
 
-`adapter.yaml` 由 `id / install / uninstall / verify` 组成，step 词汇表包括
-`file.copy`、`file.write`、`file.remove`、`command`、`check`、`profile.*` 等。
-安装时顺序执行 install，再执行 verify；失败自动回滚。
+`adapter.yaml` 由 `id / install / uninstall / verify` 组成。安装时顺序执行
+`install`，再执行 `verify`；失败自动回滚。
+
+新工作区布局推荐写法：
 
 ```yaml
 id: my-plugin
 install:
   - uses: file.copy
-    from: ${DSH_WORKDIR}/source/README.md
-    to: ${DSH_HOME}/plugins/my-plugin/README.md
+    from: ${DSH_WORKDIR}/source
+    to: ${DSH_PLUGIN_ENV}
+  - uses: file.copy
+    from: ${DSH_PLUGIN_ENV}/preset/agent.cordis.yml
+    to: ${DSH_HOME}/.agent-presets/my-plugin/agent.cordis.yml
 verify:
   - uses: check
-    run: node -e "process.exit(require('node:fs').existsSync(process.env.DSH_HOME + '/plugins/my-plugin/README.md') ? 0 : 1)"
+    run: >-
+      node -e "const fs=require('node:fs');process.exit(fs.existsSync(process.env.DSH_PLUGIN_ENV) ? 0 : 1)"
     env:
-      DSH_HOME: ${DSH_HOME}
+      DSH_PLUGIN_ENV: ${DSH_PLUGIN_ENV}
 uninstall: []
 ```
 
@@ -265,8 +408,10 @@ uninstall: []
 | --- | --- |
 | `$DSH_HOME` | harness home；未设置时为 `~/.dsh` |
 | `<home>/profiles/<name>` | profile 目录（package.json、cordis.patch.yml、pnpm-workspace.yaml） |
+| `<workspaceRoot>/<profile>/<id>` | 插件专属工作区（AI 会话 cwd） |
+| `<workspaceRoot>/<profile>/<id>/.venv` | 插件隔离依赖层（类似 Python venv） |
 | `<home>/package-manager/ledger.json` | 已安装插件 ledger |
-| `<home>/package-manager/config.json` | 包存储路径、远程 URL、自动同步开关 |
+| `<home>/package-manager/config.json` | 工作区根目录、包存储路径、远程 URL、自动同步开关 |
 | `<home>/package-manager/disabled.json` | 已关闭插件的原安装参数 |
 | `<home>/package-manager/cache` | clone / 下载 / 备份 scratch 目录 |
 
@@ -276,11 +421,12 @@ uninstall: []
 pnpm install
 pnpm run check   # typecheck + vitest + tsdown build
 pnpm run test    # vitest run
-pnpm run build   # 生成 lib/index.js、lib/web.js、lib/client.js 与类型
+pnpm run build   # 生成 lib/index.js、lib/web.js、lib/tools.js、lib/client.js 与类型
 ```
 
-测试覆盖 requirements 解析、diff plan、profile 文件 step、自定义 adapter
-安装回滚，以及 `adapter-init → restore → uninstall` 的端到端流程。
+测试覆盖：requirements 解析与 diff plan、profile 与 pluginEnv step、Cordis
+热挂载/卸载 runtime、AI dispatch、AI 工具注册，以及
+`adapter-init → restore → uninstall` 的端到端流程。
 
 ## License
 

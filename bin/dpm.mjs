@@ -53,7 +53,7 @@ async function main() {
   restore   --file <requirements.yaml> [--modes a,b] [--dry-run]
   sync      --repo <path> [--file <requirements.yaml>] [--modes a,b] [--dry-run]
   adapter-init --source <spec> --id <id> --out-dir <dir> [--profile web] [--ref <ref>]
-  config      [--storage-path <dir>] [--remote-url <url>] [--auto-sync]
+  config      [--workspace-root <dir>] [--storage-path <dir>] [--remote-url <url>] [--auto-sync]
   sync-configured
   disable     --profile <name> --id <id>
   enable      --profile <name> --id <id>
@@ -127,6 +127,7 @@ async function main() {
     case 'config': {
       const current = manager.getConfig()
       const next = {
+        workspaceRoot: valueOf(['--workspace-root']) ?? current.workspaceRoot,
         storagePath: valueOf(['--storage-path']) ?? current.storagePath,
         remoteUrl: valueOf(['--remote-url']) ?? current.remoteUrl,
         autoSync: valueOf(['--auto-sync']) === undefined ? current.autoSync : boolOf(['--auto-sync']),

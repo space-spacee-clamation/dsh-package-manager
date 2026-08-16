@@ -10,10 +10,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { PackageManager } from './manager.ts'
+import type { PackageManagerService } from './index.ts'
 import type {
-  AdapterInitRequest, InstallRequest, PackageManagerConfig, RestoreRequest, SyncRequest, ToggleRequest, UninstallRequest,
+  AdapterInitRequest, AiInstallRequest, InstallRequest, PackageManagerConfig, RestoreRequest, SyncRequest, ToggleRequest, UninstallRequest,
 } from './types.ts'
-import type {} from './index.ts'
 
 export const name = 'package-manager-web'
 
@@ -25,7 +25,7 @@ const MAX_BODY_BYTES = 1024 * 1024
 export function apply(ctx: Context): void {
   const { manager, apiPrefix } = ctx.packageManager
   ctx.effect(
-    () => ctx.webServer.register({ kind: 'prefix', path: apiPrefix, handler: handle(manager, apiPrefix) }),
+    () => ctx.webServer.register({ kind: 'prefix', path: apiPrefix, handler: handle(manager, ctx.packageManager, apiPrefix) }),
     'package-manager-web: /pm-api route',
   )
 }
@@ -46,7 +46,7 @@ function subpath(pathname: string, prefix: string): string {
   return pathname
 }
 
-function handle(manager: PackageManager, apiPrefix: string): Handler {
+function handle(manager: PackageManager, service: PackageManagerService, apiPrefix: string): Handler {
   return async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
     const path = subpath(url.pathname, apiPrefix)
@@ -70,6 +70,9 @@ function handle(manager: PackageManager, apiPrefix: string): Handler {
       if (req.method === 'POST' && path === '/sync') return dispatch(res, req, body => manager.sync(body as unknown as SyncRequest))
       if (req.method === 'POST' && path === '/adapter-init') {
         return dispatch(res, req, body => Promise.resolve(manager.adapterInit(body as unknown as AdapterInitRequest)))
+      }
+      if (req.method === 'POST' && path === '/ai-install') {
+        return dispatch(res, req, body => service.dispatchAiInstall(body as unknown as AiInstallRequest))
       }
       send(res, 404, { ok: false, error: { code: 'not_found', message: `no package-manager route for ${req.method ?? '?'} ${path}` } })
     } catch (error) {

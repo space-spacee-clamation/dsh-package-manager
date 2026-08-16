@@ -12,6 +12,7 @@ import { isAbsolute, join, resolve } from 'node:path'
 export const PROFILES_DIR = 'profiles'
 export const PM_DIR = 'package-manager'
 export const CACHE_DIR = 'cache'
+export const PLUGIN_WORKSPACES_DIR = 'plugin-workspaces'
 export const LEDGER_FILENAME = 'ledger.json'
 
 /** Resolve the harness home, matching dsh-home-paths precedence. */
@@ -33,6 +34,11 @@ export function ledgerPath(home: string): string {
 /** Download/scratch cache root. */
 export function cacheRoot(home: string): string {
   return join(pmRoot(home), CACHE_DIR)
+}
+
+/** Default root for per-plugin workspaces when the user configures none. */
+export function defaultWorkspaceRoot(home: string): string {
+  return join(pmRoot(home), PLUGIN_WORKSPACES_DIR)
 }
 
 /** Profile directory under the harness home. */
