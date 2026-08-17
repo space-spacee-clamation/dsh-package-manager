@@ -19,9 +19,11 @@ declare module '@deepseek-ai/cordis' {
 }
 
 const SYSTEM_PREFIXES = ['@deepseek-ai/', 'cordis:', '@dsh-ext/dsh-package-manager']
+const SYSTEM_SHORT_NAMES = new Set(['Loader', 'Include', 'Group', 'Hmr', 'Timer', 'TimerService', 'isolate'])
 
 export function isSystemPlugin(name: string): boolean {
   if (name === '' || name === 'root') return true
+  if (SYSTEM_SHORT_NAMES.has(name)) return true
   return SYSTEM_PREFIXES.some(prefix => name.startsWith(prefix))
 }
 
@@ -47,9 +49,10 @@ export class LocalPluginRegistry {
   /** Re-walk every registry runtime and keep cached rows for absent fibers. */
   refresh(): LocalPluginInfo[] {
     const seen = new Set<string>()
+    const loaderFibers = this.loaderFibers()
     for (const runtime of this.ctx.registry.values()) {
       for (const fiber of runtime.fibers) {
-        const name = fiber.name
+        const name = loaderFibers.get(fiber) ?? fiber.name
         if (isSystemPlugin(name)) continue
         seen.add(name)
         this.live.set(name, fiber)
@@ -61,6 +64,19 @@ export class LocalPluginRegistry {
       this.cache.set(name, { ...cached, active: false, uid: null, cached: true })
     }
     return [...this.cache.values()].sort((left, right) => left.name.localeCompare(right.name))
+  }
+
+  private loaderFibers(): Map<Fiber, string> {
+    const map = new Map<Fiber, string>()
+    const loader = this.ctx.get('loader') as {
+      entries(): Iterable<{ options?: { name?: unknown }; fiber?: Fiber }>
+    } | undefined
+    if (loader === undefined) return map
+    for (const entry of loader.entries()) {
+      if (entry.fiber === undefined || typeof entry.options?.name !== 'string') continue
+      map.set(entry.fiber, entry.options.name)
+    }
+    return map
   }
 
   private infoOf(name: string, fiber: Fiber, cached: boolean): LocalPluginInfo {

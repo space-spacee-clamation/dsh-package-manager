@@ -36,6 +36,7 @@ describe('LocalPluginRegistry', () => {
 
   it('ignores system-injected plugins such as Loader and DSH core rows', async () => {
     expect(isSystemPlugin('@deepseek-ai/cordis-plugin-loader')).toBe(true)
+expect(isSystemPlugin('Loader')).toBe(true)
     expect(isSystemPlugin('@deepseek-ai/dsh-tools')).toBe(true)
     expect(isSystemPlugin('cordis:include')).toBe(true)
     expect(isSystemPlugin('@dsh-external/local-plugin')).toBe(false)
