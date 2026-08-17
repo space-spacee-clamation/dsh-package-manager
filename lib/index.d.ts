@@ -513,6 +513,22 @@ declare class PackageManager {
 declare function createPackageManager(options?: PackageManagerOptions): PackageManager;
 declare function idFromSource(source: string): string;
 //#endregion
+//#region src/selfMigration.d.ts
+/**
+ * One-time self migration: move dsh-package-manager itself from the host-owned
+ * `dsh.profile.bundles` layer into its own managed block in the profile's
+ * `cordis.patch.yml`. After this file edit the next profile boot mounts this
+ * package from the user patch layer, so future source changes can be applied
+ * by the official watchUserPatches path.
+ */
+interface SelfMigrationResult {
+  profile: string;
+  patchPath: string;
+  removedFromBundles: boolean;
+  rowIds: string[];
+}
+declare function migratePackageManagerSelf(home: string, packageManagerDir: string, profile?: string): SelfMigrationResult;
+//#endregion
 //#region src/index.d.ts
 declare const name = "package-manager";
 /** Deployment configuration validated by the Loader. */
@@ -573,4 +589,4 @@ declare class PackageManagerService extends Service {
 /** Mount the service. */
 declare function apply(ctx: Context, config: Config): void;
 //#endregion
-export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, type AiInstallRequest, type AiInstallResult, Config, type DisabledEntry, HarnessHost, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, LocalHost, type LocalPluginInfo, type ManagerState, type OperationLog, PackageManager, type PackageManagerConfig, type PackageManagerHost, type PackageManagerOptions, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestoreRequest, type RestoreResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type ToggleRequest, type UninstallRequest, type UninstallResult, type UpdateCheckRequest, type UpdateCheckResult, type WorkspaceHistoryRequest, type WorkspaceSwitchRequest, apply, createHost, createPackageManager, idFromSource, name };
+export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, type AiInstallRequest, type AiInstallResult, Config, type DisabledEntry, HarnessHost, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, LocalHost, type LocalPluginInfo, type ManagerState, type OperationLog, PackageManager, type PackageManagerConfig, type PackageManagerHost, type PackageManagerOptions, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestoreRequest, type RestoreResult, type SelfMigrationResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type ToggleRequest, type UninstallRequest, type UninstallResult, type UpdateCheckRequest, type UpdateCheckResult, type WorkspaceHistoryRequest, type WorkspaceSwitchRequest, apply, createHost, createPackageManager, idFromSource, migratePackageManagerSelf, name };

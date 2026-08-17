@@ -26,6 +26,7 @@ import type {
 } from './types.ts'
 
 export { PackageManager, createPackageManager, idFromSource, type PackageManagerOptions } from './manager.ts'
+export { migratePackageManagerSelf, type SelfMigrationResult } from './selfMigration.ts'
 export { LocalHost, HarnessHost, createHost, type PackageManagerHost } from './hostAsync.ts'
 export type * from './types.ts'
 

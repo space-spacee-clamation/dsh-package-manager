@@ -79,23 +79,25 @@ pnpm add github:space-spacee-clamation/dsh-package-manager
 pnpm install
 ```
 
-或直接编辑 `<home>/profiles/web/package.json`：
+或直接编辑 `<home>/profiles/web/package.json`，只加依赖，**不要加进
+`dsh.profile.bundles`**：
 
 ```json
 {
   "dependencies": {
     "@dsh-ext/dsh-package-manager": "github:space-spacee-clamation/dsh-package-manager"
-  },
-  "dsh": {
-    "profile": {
-      "bundles": ["@dsh-ext/dsh-package-manager"]
-    }
   }
 }
 ```
 
-重启 DSH 后，设置列表出现“插件管理”菜单；Plugins 设置区出现“包管理” tab。
-随后安装的 dsh-bundle 插件都不需要再重启。
+然后把包管理器自己迁入 profile `cordis.patch.yml` 托管块：
+
+```bash
+dpm self-managed --repo /path/to/dsh-package-manager --profile web
+```
+
+重启 DSH 后，包管理器由用户层托管块挂载。之后包管理器自己的源码/产物变化
+就可以通过官方 `watchUserPatches` 热更新。
 
 未发布到 profile 时，也可以直接执行 `node bin/dpm.mjs ...` 使用 CLI。
 

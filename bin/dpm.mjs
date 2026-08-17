@@ -13,7 +13,7 @@
  *   node bin/dpm.mjs adapter-init --source <repo> --id plugin-id --out-dir .
  */
 
-import { createPackageManager } from '../lib/index.js'
+import { createPackageManager, migratePackageManagerSelf } from '../lib/index.js'
 
 const [command, ...args] = process.argv.slice(2)
 
@@ -51,6 +51,7 @@ async function main() {
             [--adapter-dir <dir>] [--ref <ref>] [--allow-build] [--dry-run]
   uninstall --profile <name> --id <id> [--dry-run]
   check-update --profile <name> --id <id>
+  self-managed --repo <package-manager-dir> [--profile web]
   restore   --file <requirements.yaml> [--modes a,b] [--dry-run]
   sync      --repo <path> [--file <requirements.yaml>] [--modes a,b] [--dry-run]
   switch    --path <workspace-root> [--dry-run]
@@ -103,6 +104,15 @@ async function main() {
         id: valueOf(['--id', '-i']) ?? '',
       })
       printLogs(result)
+      print(result)
+      return
+    }
+    case 'self-managed': {
+      const result = migratePackageManagerSelf(
+        process.env.DSH_HOME ?? require('node:os').homedir() + '/.dsh',
+        valueOf(['--repo', '-r']) ?? '.',
+        valueOf(['--profile', '-p']) ?? 'web',
+      )
       print(result)
       return
     }
