@@ -11,7 +11,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { PackageManagerService } from './index.ts'
 import type {
-  AdapterInitRequest, AiInstallRequest, InstallRequest, PackageManagerConfig, RestoreRequest, SyncRequest, ToggleRequest, UninstallRequest, WorkspaceHistoryRequest, WorkspaceSwitchRequest,
+  AdapterInitRequest, AiInstallRequest, InstallRequest, PackageManagerConfig, RestoreRequest, SyncRequest, ToggleRequest, UninstallRequest, UpdateCheckRequest, WorkspaceHistoryRequest, WorkspaceSwitchRequest,
 } from './types.ts'
 
 export const name = 'package-manager-web'
@@ -83,6 +83,7 @@ function handle(ctx: Context, service: PackageManagerService, apiPrefix: string)
         return dispatch(res, req, body => Promise.resolve(service.setConfig(body as unknown as PackageManagerConfig)))
       }
       if (req.method === 'POST' && path === '/sync-configured') return dispatch(res, req, () => service.syncConfigured())
+      if (req.method === 'POST' && path === '/check-update') return dispatch(res, req, body => service.checkUpdate(body as unknown as UpdateCheckRequest))
       if (req.method === 'POST' && path === '/disable') return dispatch(res, req, body => service.disable(body as unknown as ToggleRequest))
       if (req.method === 'POST' && path === '/enable') return dispatch(res, req, body => service.enable(body as unknown as ToggleRequest))
       if (req.method === 'POST' && path === '/restart') {

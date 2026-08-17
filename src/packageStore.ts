@@ -182,6 +182,26 @@ async function refreshGitMirror(mirror: string, targetRef: string, git: GitRunne
   return git(args, mirror)
 }
 
+/**
+ * Force-sync one git mirror from the remote. Update checks call this before
+ * installing so a successful check never clones a stale mirror back.
+ */
+export async function syncGitMirror(
+  packageRoot: string,
+  url: string,
+  targetRef: string,
+  git: GitRunner,
+): Promise<void> {
+  const mirror = gitMirrorPath(packageRoot, url)
+  mkdirSync(dirname(mirror), { recursive: true })
+  if (!existsSync(mirror)) {
+    await ensureGitMirror(mirror, url, targetRef, git)
+    return
+  }
+  const result = await refreshGitMirror(mirror, targetRef, git)
+  if (result.exitCode !== 0) throw gitError('git mirror update', result)
+}
+
 async function cloneDirect(
   url: string,
   targetRef: string,

@@ -142,6 +142,23 @@ interface ToggleRequest {
   profile: string;
   id: string;
 }
+interface UpdateCheckRequest {
+  profile: string;
+  id: string;
+}
+interface UpdateCheckResult {
+  profile: string;
+  id: string;
+  /** Git source only. */
+  status: 'up-to-date' | 'updated' | 'not-git';
+  /** Previously installed commit, when a git source. */
+  previousCommit: string;
+  /** Latest remote commit, when a git source. */
+  latestCommit: string;
+  /** True when a newer commit was installed in the same operation. */
+  updated: boolean;
+  logs: OperationLog[];
+}
 interface WorkspaceHistoryRequest {
   path: string;
 }
@@ -478,6 +495,9 @@ declare class PackageManager {
   forgetDisabled(request: ToggleRequest): DisabledEntry | undefined;
   syncConfigured(): Promise<RestoreResult>;
   private syncConfiguredInner;
+  /** Check a git-installed plugin for a newer remote commit and install it. */
+  checkUpdate(request: UpdateCheckRequest): Promise<UpdateCheckResult>;
+  private checkUpdateInner;
   disable(request: ToggleRequest): Promise<UninstallResult>;
   private disableInner;
   enable(request: ToggleRequest): Promise<InstallResult>;
@@ -548,6 +568,7 @@ declare class PackageManagerService extends Service {
   sync(request: SyncRequest): Promise<RestoreResult>;
   syncConfigured(): Promise<RestoreResult>;
   adapterInit(request: AdapterInitRequest): Promise<AdapterInitResult>;
+  checkUpdate(request: UpdateCheckRequest): Promise<UpdateCheckResult>;
   disable(request: ToggleRequest): Promise<UninstallResult>;
   enable(request: ToggleRequest): Promise<InstallResult>;
   forgetDisabled(request: ToggleRequest): DisabledEntry | undefined;
@@ -570,4 +591,4 @@ declare class PackageManagerService extends Service {
 /** Mount the service. */
 declare function apply(ctx: Context, config: Config): void;
 //#endregion
-export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, type AiInstallRequest, type AiInstallResult, Config, type DisabledEntry, HarnessHost, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, LocalHost, type LocalPluginInfo, type ManagerState, type OperationLog, PackageManager, type PackageManagerConfig, type PackageManagerHost, type PackageManagerOptions, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestartResult, type RestoreRequest, type RestoreResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type ToggleRequest, type UninstallRequest, type UninstallResult, type WorkspaceHistoryRequest, type WorkspaceSwitchRequest, apply, createHost, createPackageManager, idFromSource, name };
+export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, type AiInstallRequest, type AiInstallResult, Config, type DisabledEntry, HarnessHost, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, LocalHost, type LocalPluginInfo, type ManagerState, type OperationLog, PackageManager, type PackageManagerConfig, type PackageManagerHost, type PackageManagerOptions, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestartResult, type RestoreRequest, type RestoreResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type ToggleRequest, type UninstallRequest, type UninstallResult, type UpdateCheckRequest, type UpdateCheckResult, type WorkspaceHistoryRequest, type WorkspaceSwitchRequest, apply, createHost, createPackageManager, idFromSource, name };

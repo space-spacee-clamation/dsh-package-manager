@@ -121,6 +121,17 @@ modes:
     expect(manager.state().entries).toEqual([])
   }, 120_000)
 
+  it('check-update reports not-git for file plugins', async () => {
+    const home = tempDir()
+    const fixture = makeBundleFixture(join(home, 'fixture'))
+    const manager = createPackageManager({ home })
+    await manager.install({ profile: 'web', id: 'fixture', source: fixture, adapter: 'dsh-bundle' })
+    const result = await manager.checkUpdate({ profile: 'web', id: 'fixture' })
+    expect(result.status).toBe('not-git')
+    expect(result.updated).toBe(false)
+    await manager.uninstall({ profile: 'web', id: 'fixture' })
+  }, 120_000)
+
   it('rejects monorepo sources with workspace: dependencies before touching the profile', async () => {
     const home = tempDir()
     const fixture = makeBundleFixture(join(home, 'fixture'))

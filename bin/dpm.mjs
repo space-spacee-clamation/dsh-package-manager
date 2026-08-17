@@ -51,6 +51,7 @@ async function main() {
   install   --profile <name> --source <spec> [--id <id>] [--adapter auto|dsh-bundle|custom]
             [--adapter-dir <dir>] [--ref <ref>] [--allow-build] [--dry-run]
   uninstall --profile <name> --id <id> [--dry-run]
+  check-update --profile <name> --id <id>
   restore   --file <requirements.yaml> [--modes a,b] [--dry-run]
   sync      --repo <path> [--file <requirements.yaml>] [--modes a,b] [--dry-run]
   switch    --path <workspace-root> [--dry-run]
@@ -92,6 +93,15 @@ async function main() {
         profile: valueOf(['--profile', '-p']) ?? 'web',
         id: valueOf(['--id', '-i']) ?? '',
         dryRun: boolOf(['--dry-run']),
+      })
+      printLogs(result)
+      print(result)
+      return
+    }
+    case 'check-update': {
+      const result = await manager.checkUpdate({
+        profile: valueOf(['--profile', '-p']) ?? 'web',
+        id: valueOf(['--id', '-i']) ?? '',
       })
       printLogs(result)
       print(result)

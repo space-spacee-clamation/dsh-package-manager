@@ -57,6 +57,8 @@ diff——这就是官方热重载路径，新增行即挂载，删行即卸载�
   都走官方 `watchUserPatches`，无需重启。
 - **开关即禁用行**：禁用保留依赖和 ledger 记录，只在托管块尾部增删
   `disabled` 补丁行。
+- **检查更新**：对 git 源插件执行 `git ls-remote`，有更新时自动同步
+  mirror 并完成热更新。
 - **无 bundle 插件仍可用 custom adapter**：声明式 YAML adapter 执行任意
   安装/卸载步骤；这类插件不承诺热重载，成功后写 restart 提示。
 - **requirements 复原与同步**：`deps.yaml` 按 id 做最小差集
@@ -104,6 +106,7 @@ dpm state
 dpm install --profile web --source github:owner/repo --adapter auto --dry-run
 dpm install --profile web --source github:owner/repo --allow-build
 dpm uninstall --profile web --id repo
+dpm check-update --profile web --id repo
 dpm disable --profile web --id repo
 dpm enable --profile web --id repo
 dpm restore --file ./requirements/deps.yaml

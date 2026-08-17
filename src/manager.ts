@@ -23,10 +23,11 @@ import { loadCustomAdapter, runCustomInstall, scaffoldCustomAdapter } from './ad
 import { getEntry, isEntryEffective, listEntries, loadEffectiveLedger, loadLedger, removeEntry, saveLedger, setEntry } from './ledger.ts'
 import { createHost, type PackageManagerHost } from './hostAsync.ts'
 import { defaultWorkspaceRoot, packageStoreRoot, pmRoot, profileDir, resolveHome, workRoot } from './paths.ts'
+import { syncGitMirror } from './packageStore.ts'
 import { pluginEnvDir, pluginWorkspaceDir } from './pluginWorkspace.ts'
 import { loadConfig, loadDisabled, removeDisabledEntry, saveConfig, upsertDisabledEntry } from './config.ts'
 import { DEFAULT_PROFILE_BUNDLES, ensureProfile, healProfiles, listProfiles, PROFILE_TEMPLATES, readManifest } from './profile.ts'
-import { detectSourceKind, materializeSource, type GitRunner } from './source.ts'
+import { detectSourceKind, materializeSource, parseGithubSpec, type GitRunner } from './source.ts'
 import { clearWorkspaceHistory, forgetWorkspaceHistory, loadWorkspaceHistory, recordWorkspaceHistory } from './runtimeStore.ts'
 import { parseRequirements, planRestore, planWorkspaceSwitch, resolveAdapterDir } from './spec.ts'
 import { StepExecutor, type CommandRunner, type DshRunner, type PnpmRunner } from './steps.ts'
@@ -42,6 +43,7 @@ import type {
   AdapterContext, AdapterInitRequest, AdapterInitResult, DisabledEntry, InstallRequest, InstallResult, Ledger,
   LedgerEntry, ManagerState, OperationLog, PackageManagerConfig, PlanAction, RestoreRequest, RequirementsSpec,
   RestoreResult, SpecEntry, StepRecord, SyncRequest, ToggleRequest, UninstallRequest, UninstallResult,
+  UpdateCheckRequest, UpdateCheckResult,
 } from './types.ts'
 
 export interface PackageManagerOptions {
@@ -691,6 +693,74 @@ export class PackageManager {
     const file = join(repo, 'requirements', DEPS_FILENAME)
     if (!existsSync(file)) throw new Error(`requirements file not found: ${file}`)
     return this.restoreInner({ file })
+  }
+
+  /** Check a git-installed plugin for a newer remote commit and install it. */
+  async checkUpdate(request: UpdateCheckRequest): Promise<UpdateCheckResult> {
+    return this.enqueue(() => this.checkUpdateInner(request))
+  }
+
+  private async checkUpdateInner(request: UpdateCheckRequest): Promise<UpdateCheckResult> {
+    const { profile, id } = request
+    const logs: OperationLog[] = []
+    const log = (level: OperationLog['level'], message: string): void => { logs.push({ level, message }) }
+    const ledger = loadLedger(this.home)
+    const entry = getEntry(ledger, profile, id)
+    if (entry === undefined) throw new Error(`plugin ${JSON.stringify(id)} is not installed in profile ${JSON.stringify(profile)}`)
+    if (entry.sourceKind !== 'git') {
+      log('info', `${id} is not a git source; update check skipped`)
+      return { profile, id, status: 'not-git', previousCommit: entry.resolvedCommit, latestCommit: '', updated: false, logs }
+    }
+
+    const github = parseGithubSpec(entry.source)
+    const url = github?.url ?? entry.source.replace(/^git\+/, '')
+    const targetRef = github !== undefined && github.ref !== '' ? github.ref : entry.ref
+    if (/^[0-9a-f]{7,40}$/i.test(targetRef)) {
+      log('info', `${id} is pinned to commit ${targetRef}; treated as up-to-date`)
+      return { profile, id, status: 'up-to-date', previousCommit: entry.resolvedCommit, latestCommit: entry.resolvedCommit, updated: false, logs }
+    }
+
+    const args = ['ls-remote', url]
+    if (targetRef !== '') args.push(targetRef)
+    else args.push('HEAD')
+    const remote = await this.git(args, this.home)
+    if (remote.exitCode !== 0) throw new Error(`git ls-remote failed (exit ${remote.exitCode}): ${remote.stderr || remote.stdout}`)
+    const latestCommit = remote.stdout.trim().split(/\s+/)[0] ?? ''
+    if (latestCommit === '') throw new Error(`git ls-remote returned no commit for ${url}`)
+    log('info', `checked ${id}: installed ${entry.resolvedCommit} -> remote ${latestCommit}`)
+    if (latestCommit === entry.resolvedCommit) {
+      return { profile, id, status: 'up-to-date', previousCommit: entry.resolvedCommit, latestCommit, updated: false, logs }
+    }
+
+    // Force-refresh the shared mirror so the subsequent install cannot clone
+    // a stale mirror back.
+    await syncGitMirror(packageStoreRoot(this.home), url, targetRef, this.git)
+    const previousCommit = entry.resolvedCommit
+    const reinstall: InstallRequest = {
+      profile: entry.profile,
+      id: entry.id,
+      source: entry.source,
+      adapter: entry.adapter,
+      ...(entry.adapterDir === '' ? {} : { adapterDir: entry.adapterDir }),
+      ...(entry.ref === '' ? {} : { ref: entry.ref }),
+      allowBuild: entry.allowBuild ?? false,
+    }
+    await this.uninstallInner({ profile, id })
+    try {
+      const installed = await this.installInner(reinstall)
+      logs.push(...installed.logs)
+      log('info', `updated ${id} from ${previousCommit} to ${latestCommit}`)
+      return { profile, id, status: 'updated', previousCommit, latestCommit, updated: true, logs }
+    } catch (error) {
+      // Best-effort restore of the previous commit so a failed update does not
+      // leave the plugin uninstalled.
+      try {
+        await this.installInner({ ...reinstall, ref: previousCommit })
+      } catch (rollbackError) {
+        throw new Error(`update failed (${messageOf(error)}); rollback to ${previousCommit} also failed: ${messageOf(rollbackError)}`)
+      }
+      throw new Error(`update failed and was rolled back to ${previousCommit}: ${messageOf(error)}`)
+    }
   }
 
   async disable(request: ToggleRequest): Promise<UninstallResult> {

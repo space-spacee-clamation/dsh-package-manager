@@ -25,6 +25,7 @@ import { resolveHome, runtimeRoot } from './paths.ts'
 import type {
   AdapterInitRequest, AdapterInitResult, AiInstallRequest, AiInstallResult, DisabledEntry, InstallRequest, InstallResult,
   LocalPluginInfo, ManagerState, PackageManagerConfig, RestartResult, RestoreRequest, RestoreResult, SyncRequest, ToggleRequest, UninstallRequest, UninstallResult,
+  UpdateCheckRequest, UpdateCheckResult,
 } from './types.ts'
 
 export { PackageManager, createPackageManager, idFromSource, type PackageManagerOptions } from './manager.ts'
@@ -143,6 +144,10 @@ export class PackageManagerService extends Service {
 
   adapterInit(request: AdapterInitRequest): Promise<AdapterInitResult> {
     return this.manager.adapterInit(request)
+  }
+
+  checkUpdate(request: UpdateCheckRequest): Promise<UpdateCheckResult> {
+    return this.manager.checkUpdate(request)
   }
 
   disable(request: ToggleRequest): Promise<UninstallResult> {

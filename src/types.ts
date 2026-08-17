@@ -152,6 +152,25 @@ export interface ToggleRequest {
   id: string
 }
 
+export interface UpdateCheckRequest {
+  profile: string
+  id: string
+}
+
+export interface UpdateCheckResult {
+  profile: string
+  id: string
+  /** Git source only. */
+  status: 'up-to-date' | 'updated' | 'not-git'
+  /** Previously installed commit, when a git source. */
+  previousCommit: string
+  /** Latest remote commit, when a git source. */
+  latestCommit: string
+  /** True when a newer commit was installed in the same operation. */
+  updated: boolean
+  logs: OperationLog[]
+}
+
 export interface WorkspaceHistoryRequest {
   path: string
 }

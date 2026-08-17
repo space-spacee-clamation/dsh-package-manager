@@ -10,7 +10,7 @@
 import { useEffect, useState, type FormEvent, type ReactElement } from 'react'
 import type {
   AdapterInitResult, AiInstallResult, DisabledEntry, InstallResult, ManagerState, OperationLog, PackageManagerConfig,
-  RestoreResult, UninstallResult,
+  RestoreResult, UninstallResult, UpdateCheckResult,
 } from '../types.ts'
 import type { LocaleKey } from './locales.ts'
 import { styles } from './styles.ts'
@@ -19,7 +19,7 @@ export interface PackageManagerTabProps {
   t: (key: LocaleKey) => string
 }
 
-type AnyResult = InstallResult | UninstallResult | RestoreResult | AdapterInitResult | PackageManagerConfig | AiInstallResult | DisabledEntry
+type AnyResult = InstallResult | UninstallResult | RestoreResult | AdapterInitResult | PackageManagerConfig | AiInstallResult | DisabledEntry | UpdateCheckResult
 type Page = 'workspace' | 'settings'
 type DeleteTarget = { kind: 'installed' | 'disabled'; profile: string; id: string }
 
@@ -452,14 +452,27 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
                         )}
                       </div>
                       <div style={styles.pluginBottom}>
-                        <button
-                          type="button"
-                          style={{ ...styles.button, ...(confirmDelete === key ? styles.dangerArmed : styles.danger) }}
-                          disabled={busy}
-                          onClick={() => requestDelete({ kind: 'installed', profile: entry.profile, id: entry.id })}
-                        >
-                          {confirmDelete === key ? t('deleteConfirm') : t('uninstall')}
-                        </button>
+                        <div style={styles.pluginActions}>
+                          {entry.sourceKind === 'git' && (
+                            <button
+                              type="button"
+                              style={styles.button}
+                              disabled={busy}
+                              title={t('checkUpdate')}
+                              onClick={() => void run(() => api<UpdateCheckResult>('/check-update', { profile: entry.profile, id: entry.id }))}
+                            >
+                              {t('checkUpdate')}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            style={{ ...styles.button, ...(confirmDelete === key ? styles.dangerArmed : styles.danger) }}
+                            disabled={busy}
+                            onClick={() => requestDelete({ kind: 'installed', profile: entry.profile, id: entry.id })}
+                          >
+                            {confirmDelete === key ? t('deleteConfirm') : t('uninstall')}
+                          </button>
+                        </div>
                         <label style={styles.switchTrack} title={off ? t('enable') : t('disable')}>
                           <input
                             type="checkbox"

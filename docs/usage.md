@@ -67,6 +67,7 @@ install        --profile <name> --source <spec> [--id <id>]
                [--adapter auto|dsh-bundle|custom] [--adapter-dir <dir>]
                [--ref <ref>] [--allow-build] [--dry-run]
 uninstall      --profile <name> --id <id> [--dry-run]
+check-update   --profile <name> --id <id>
 restore        --file <requirements.yaml> [--modes a,b] [--dry-run]
 sync           --repo <path> [--file <requirements.yaml>] [--modes a,b] [--dry-run]
 adapter-init   --source <spec> --id <id> --out-dir <dir>
@@ -85,6 +86,7 @@ dpm state
 dpm install --profile web --source github:owner/repo --adapter auto --dry-run
 dpm install --profile web --source github:owner/repo --allow-build
 dpm uninstall --profile web --id repo
+dpm check-update --profile web --id repo
 dpm disable --profile web --id repo
 dpm enable --profile web --id repo
 dpm adapter-init --source https://github.com/o/r.git --id r --out-dir .
@@ -112,6 +114,7 @@ CLI 使用纯 core：dsh-bundle 安装同样写 profile `cordis.patch.yml` 托�
 | `POST` | `/pm-api/ai-install` | 创建插件工作区 + AI 会话并派发安装（`AiInstallRequest`） |
 | `POST` | `/pm-api/install` | 安装插件（`InstallRequest`） |
 | `POST` | `/pm-api/uninstall` | 卸载插件（`UninstallRequest`） |
+| `POST` | `/pm-api/check-update` | 检查 git 插件更新；有新 commit 时自动同步并更新（`UpdateCheckRequest`） |
 | `POST` | `/pm-api/disable` | 关闭插件（dsh-bundle 热禁用补丁行并保留安装；其余记录参数后卸载） |
 | `POST` | `/pm-api/enable` | 重新打开已关闭插件 |
 | `POST` | `/pm-api/restore` | 从 requirements 文件复原 |
