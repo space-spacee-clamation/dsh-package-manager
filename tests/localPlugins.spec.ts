@@ -34,6 +34,19 @@ describe('LocalPluginRegistry', () => {
     await ctx.fiber.dispose()
   })
 
+  it('releases and restores a direct local plugin fiber', async () => {
+    const ctx = new Context()
+    const fiber = ctx.plugin({ name: 'toggle-local', apply() {} })
+    await fiber
+    const registry = new LocalPluginRegistry(ctx)
+    expect(registry.list().find(item => item.name === 'toggle-local')?.active).toBe(true)
+    await registry.release('toggle-local')
+    expect(registry.list().find(item => item.name === 'toggle-local')?.released).toBe(true)
+    await registry.restore('toggle-local')
+    expect(registry.list().find(item => item.name === 'toggle-local')?.active).toBe(true)
+    await ctx.fiber.dispose()
+  })
+
   it('ignores system-injected plugins such as Loader and DSH core rows', async () => {
     expect(isSystemPlugin('@deepseek-ai/cordis-plugin-loader')).toBe(true)
 expect(isSystemPlugin('Loader')).toBe(true)

@@ -1,12 +1,11 @@
 /**
- * Live local-plugin discovery.
+ * Live local-plugin discovery and release/restore.
  *
- * Cordis emits `internal/plugin` when a fiber is created — BEFORE the plugin
- * body refreshes/activates — so one listener observes every future local
- * registration. Existing fibers are discovered by walking
- * `ctx.registry.values()`. `refresh()` re-walks the registry and keeps a
- * cache of previously observed switches so rows the user has seen do not
- * disappear on the next refresh.
+ * Discovery listens on Cordis `internal/plugin` (fires BEFORE activation) and
+ * walks `ctx.registry.values()`. Loader-managed local rows are released by
+ * `entry.update({ disabled: true })`; direct `ctx.plugin()` fibers are
+ * disposed and their parent/callback/config are cached so they can be
+ * restored.
  */
 
 import { type Context, type Fiber } from '@deepseek-ai/cordis'
@@ -16,6 +15,21 @@ declare module '@deepseek-ai/cordis' {
   interface Events {
     'internal/plugin'(fiber: Fiber): void
   }
+}
+
+interface LoaderEntryLike {
+  options?: { name?: unknown }
+  fiber?: Fiber
+  disabled?: boolean
+  update(options: { disabled: boolean }): Promise<void>
+}
+
+interface LocalFiberRecord {
+  name: string
+  parent: Context
+  callback: Function
+  config: unknown
+  fiber: Fiber | undefined
 }
 
 const SYSTEM_PREFIXES = ['@deepseek-ai/', 'cordis:', '@dsh-ext/dsh-package-manager']
@@ -28,16 +42,14 @@ export function isSystemPlugin(name: string): boolean {
 }
 
 export class LocalPluginRegistry {
-  private readonly live = new Map<string, Fiber>()
   private readonly cache = new Map<string, LocalPluginInfo>()
+  private readonly records = new Map<string, LocalFiberRecord[]>()
 
   constructor(private readonly ctx: Context) {
     this.refresh()
     ctx.on('internal/plugin', fiber => {
-      if (!isSystemPlugin(fiber.name)) {
-        this.live.set(fiber.name, fiber)
-        this.cache.set(fiber.name, this.infoOf(fiber.name, fiber, false))
-      }
+      if (isSystemPlugin(fiber.name)) return
+      this.observeFiber(fiber, fiber.name)
     })
   }
 
@@ -46,17 +58,23 @@ export class LocalPluginRegistry {
     return [...this.cache.values()].sort((left, right) => left.name.localeCompare(right.name))
   }
 
-  /** Re-walk every registry runtime and keep cached rows for absent fibers. */
+  /** Re-walk loader entries and registry runtimes; cache rows missing since last refresh. */
   refresh(): LocalPluginInfo[] {
     const seen = new Set<string>()
-    const loaderFibers = this.loaderFibers()
+    for (const [name, entry] of this.loaderEntries()) {
+      if (isSystemPlugin(name)) continue
+      seen.add(name)
+      const released = entry.disabled === true
+      const fiber = entry.fiber
+      if (fiber !== undefined) this.observeFiber(fiber, name)
+      else this.cacheRow(name, null, false, released, true)
+    }
     for (const runtime of this.ctx.registry.values()) {
       for (const fiber of runtime.fibers) {
-        const name = loaderFibers.get(fiber) ?? fiber.name
-        if (isSystemPlugin(name)) continue
+        const name = this.loaderNameOf(fiber) ?? fiber.name
+        if (isSystemPlugin(name) || seen.has(name)) continue
         seen.add(name)
-        this.live.set(name, fiber)
-        this.cache.set(name, this.infoOf(name, fiber, false))
+        this.observeFiber(fiber, name)
       }
     }
     for (const [name, cached] of this.cache) {
@@ -66,26 +84,111 @@ export class LocalPluginRegistry {
     return [...this.cache.values()].sort((left, right) => left.name.localeCompare(right.name))
   }
 
-  private loaderFibers(): Map<Fiber, string> {
-    const map = new Map<Fiber, string>()
+  /** Release one local plugin: disable its loader row or dispose its fiber. */
+  async release(name: string): Promise<LocalPluginInfo> {
+    const entry = this.loaderEntries().get(name)
+    if (entry !== undefined) {
+      await entry.update({ disabled: true })
+      this.cacheRow(name, null, false, true, false)
+      return this.cache.get(name)!
+    }
+    let released = false
+    for (const record of this.records.get(name) ?? []) {
+      if (record.fiber?.uid == null) continue
+      await record.fiber.dispose()
+      record.fiber = undefined
+      released = true
+    }
+    this.cacheRow(name, null, false, released, !released)
+    return this.cache.get(name)!
+  }
+
+  /** Restore a previously released local plugin. */
+  async restore(name: string): Promise<LocalPluginInfo> {
+    const entry = this.loaderEntries().get(name)
+    if (entry !== undefined) {
+      await entry.update({ disabled: false })
+      this.cacheRow(name, entry.fiber ?? null, entry.fiber?.state === 2, false, entry.fiber === undefined)
+      return this.cache.get(name)!
+    }
+    const restored: LocalFiberRecord[] = []
+    for (const record of this.records.get(name) ?? []) {
+      if (record.fiber?.uid != null) continue
+      try {
+        Object.defineProperty(record.callback, 'name', { value: name })
+      } catch {
+        // Keep the original callback when its name is non-configurable.
+      }
+      const fiber = record.parent.plugin(record.callback, record.config)
+      await fiber
+      restored.push({ ...record, fiber })
+    }
+    if (restored.length > 0) this.records.set(name, restored)
+    const info = restored.length > 0
+      ? this.infoOf(name, restored[0]!.fiber!, false, false)
+      : { name, uid: null, state: 0, active: false, cached: true, released: false }
+    this.cache.set(name, info)
+    return info
+  }
+
+  private observeFiber(fiber: Fiber, name: string): void {
+    let bucket = this.records.get(name) ?? []
+    let record = bucket.find(item => item.fiber === fiber || item.fiber?.uid === fiber.uid)
+    if (record === undefined) {
+      record = {
+        name,
+        parent: fiber.parent,
+        callback: fiber.runtime?.callback ?? (() => {}),
+        config: (fiber as unknown as { _config?: unknown })._config,
+        fiber,
+      }
+      bucket.push(record)
+      this.records.set(name, bucket)
+    } else {
+      record.fiber = fiber
+    }
+    this.cacheRow(name, fiber, fiber.state === 2, false, false)
+  }
+
+  private cacheRow(
+    name: string,
+    fiber: Fiber | null,
+    active: boolean,
+    released: boolean,
+    cached: boolean,
+  ): void {
+    const previous = this.cache.get(name)
+    this.cache.set(name, {
+      name,
+      uid: fiber?.uid ?? null,
+      state: fiber?.state ?? previous?.state ?? 0,
+      active,
+      cached,
+      released,
+    })
+  }
+
+  private infoOf(name: string, fiber: Fiber, released: boolean, cached: boolean): LocalPluginInfo {
+    return { name, uid: fiber.uid, state: fiber.state, active: fiber.state === 2, cached, released }
+  }
+
+  private loaderEntries(): Map<string, LoaderEntryLike> {
+    const map = new Map<string, LoaderEntryLike>()
     const loader = this.ctx.get('loader') as {
-      entries(): Iterable<{ options?: { name?: unknown }; fiber?: Fiber }>
+      entries(): Iterable<LoaderEntryLike>
     } | undefined
     if (loader === undefined) return map
     for (const entry of loader.entries()) {
-      if (entry.fiber === undefined || typeof entry.options?.name !== 'string') continue
-      map.set(entry.fiber, entry.options.name)
+      const name = entry.options?.name
+      if (typeof name === 'string') map.set(name, entry)
     }
     return map
   }
 
-  private infoOf(name: string, fiber: Fiber, cached: boolean): LocalPluginInfo {
-    return {
-      name,
-      uid: fiber.uid,
-      state: fiber.state,
-      active: fiber.state === 2, // FiberState.ACTIVE
-      cached,
+  private loaderNameOf(fiber: Fiber): string | undefined {
+    for (const [name, entry] of this.loaderEntries()) {
+      if (entry.fiber === fiber) return name
     }
+    return undefined
   }
 }

@@ -180,6 +180,11 @@ interface LocalPluginInfo {
   active: boolean;
   /** True when this row was cached from a previous traversal and is not currently mounted. */
   cached: boolean;
+  /** True when this row was explicitly released by the package manager. */
+  released: boolean;
+}
+interface LocalPluginToggleRequest {
+  name: string;
 }
 interface ManagerState {
   home: string;
@@ -556,6 +561,10 @@ declare class PackageManagerService extends Service {
   localPlugins(): LocalPluginInfo[];
   /** Re-walk Cordis fibers and refresh the cached local-plugin view. */
   refreshLocalPlugins(): LocalPluginInfo[];
+  /** Release a non-manager local plugin. */
+  releaseLocalPlugin(request: LocalPluginToggleRequest): Promise<LocalPluginInfo>;
+  /** Restore a previously released local plugin. */
+  restoreLocalPlugin(request: LocalPluginToggleRequest): Promise<LocalPluginInfo>;
   doctor(): Promise<{
     profiles: unknown[];
     droppedLedger: string[];
@@ -589,4 +598,4 @@ declare class PackageManagerService extends Service {
 /** Mount the service. */
 declare function apply(ctx: Context, config: Config): void;
 //#endregion
-export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, type AiInstallRequest, type AiInstallResult, Config, type DisabledEntry, HarnessHost, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, LocalHost, type LocalPluginInfo, type ManagerState, type OperationLog, PackageManager, type PackageManagerConfig, type PackageManagerHost, type PackageManagerOptions, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestoreRequest, type RestoreResult, type SelfMigrationResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type ToggleRequest, type UninstallRequest, type UninstallResult, type UpdateCheckRequest, type UpdateCheckResult, type WorkspaceHistoryRequest, type WorkspaceSwitchRequest, apply, createHost, createPackageManager, idFromSource, migratePackageManagerSelf, name };
+export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, type AiInstallRequest, type AiInstallResult, Config, type DisabledEntry, HarnessHost, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, LocalHost, type LocalPluginInfo, type LocalPluginToggleRequest, type ManagerState, type OperationLog, PackageManager, type PackageManagerConfig, type PackageManagerHost, type PackageManagerOptions, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestoreRequest, type RestoreResult, type SelfMigrationResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type ToggleRequest, type UninstallRequest, type UninstallResult, type UpdateCheckRequest, type UpdateCheckResult, type WorkspaceHistoryRequest, type WorkspaceSwitchRequest, apply, createHost, createPackageManager, idFromSource, migratePackageManagerSelf, name };

@@ -19,7 +19,7 @@ export interface PackageManagerTabProps {
   t: (key: LocaleKey) => string
 }
 
-type AnyResult = InstallResult | UninstallResult | RestoreResult | AdapterInitResult | PackageManagerConfig | AiInstallResult | DisabledEntry | UpdateCheckResult | LocalPluginInfo[]
+type AnyResult = InstallResult | UninstallResult | RestoreResult | AdapterInitResult | PackageManagerConfig | AiInstallResult | DisabledEntry | UpdateCheckResult | LocalPluginInfo[] | LocalPluginInfo
 type Page = 'workspace' | 'settings'
 type DeleteTarget = { kind: 'installed' | 'disabled'; profile: string; id: string }
 
@@ -497,11 +497,24 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
               {localPlugins.length === 0 ? (
                 <p style={styles.intro}>{t('localPluginsEmpty')}</p>
               ) : (
-                <div style={styles.row}>
+                <div style={styles.list}>
                   {localPlugins.map(item => (
-                    <span key={`${item.name}-${String(item.uid)}`} style={{ ...styles.badge, ...(item.active ? styles.hotBadge : item.cached ? { opacity: 0.55 } : {}) }}>
-                      <span style={{ ...styles.statusDot, ...(item.active ? {} : { background: '#9aa0a8' }) }} /> {item.name}
-                    </span>
+                    <div key={`${item.name}-${String(item.uid)}`} style={styles.localRow}>
+                      <span style={{ ...styles.statusDot, ...(item.active ? {} : { background: '#9aa0a8' }) }} />
+                      <span style={styles.localName}>{item.name}</span>
+                      <span style={item.active ? styles.hotBadge : styles.badge}>{item.active ? t('on') : item.released ? t('localReleased') : t('localCached')}</span>
+                      <button
+                        type="button"
+                        style={item.released || !item.active ? styles.toggleOn : styles.toggleOff}
+                        disabled={busy}
+                        onClick={() => void run(() => api<LocalPluginInfo>(
+                          item.released || !item.active ? '/local-plugins/restore' : '/local-plugins/release',
+                          { name: item.name },
+                        ))}
+                      >
+                        {item.released || !item.active ? t('localRestore') : t('localRelease')}
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -718,7 +731,7 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
                     disabled={busy || requirementsFile === ''}
                     onClick={() => void run(() => api<RestoreResult>('/restore', { file: requirementsFile, modes: modesList() }))}
                   >
-                    {t('restore')}
+                    {t('localRestore')}
                   </button>
                   <button
                     type="button"

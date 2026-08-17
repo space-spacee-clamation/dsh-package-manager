@@ -114,6 +114,12 @@ export const styles: Record<string, CSSProperties> = {
     fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 12, padding: '4px 9px',
     border: `1px solid ${BORDER}`, borderRadius: 999, color: MUTED, overflowWrap: 'anywhere',
   },
+  localRow: {
+    display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+    padding: '10px 12px', border: `1px solid ${BORDER}`, borderRadius: 12,
+    background: NEUTRAL_0,
+  },
+  localName: { flex: '1 1 180px', minWidth: 140, fontWeight: 700 },
   pluginGrid: {
     display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
     gap: 18, alignItems: 'stretch',

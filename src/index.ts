@@ -21,7 +21,7 @@ import { PackageManager } from './manager.ts'
 import { resolveHome } from './paths.ts'
 import type {
   AdapterInitRequest, AdapterInitResult, AiInstallRequest, AiInstallResult, DisabledEntry, InstallRequest, InstallResult,
-  LocalPluginInfo, ManagerState, PackageManagerConfig, RestoreRequest, RestoreResult, SyncRequest, ToggleRequest, UninstallRequest, UninstallResult,
+  LocalPluginInfo, LocalPluginToggleRequest, ManagerState, PackageManagerConfig, RestoreRequest, RestoreResult, SyncRequest, ToggleRequest, UninstallRequest, UninstallResult,
   UpdateCheckRequest, UpdateCheckResult,
 } from './types.ts'
 
@@ -97,6 +97,16 @@ export class PackageManagerService extends Service {
   /** Re-walk Cordis fibers and refresh the cached local-plugin view. */
   refreshLocalPlugins(): LocalPluginInfo[] {
     return this.localPluginRegistry.refresh()
+  }
+
+  /** Release a non-manager local plugin. */
+  releaseLocalPlugin(request: LocalPluginToggleRequest): Promise<LocalPluginInfo> {
+    return this.localPluginRegistry.release(request.name)
+  }
+
+  /** Restore a previously released local plugin. */
+  restoreLocalPlugin(request: LocalPluginToggleRequest): Promise<LocalPluginInfo> {
+    return this.localPluginRegistry.restore(request.name)
   }
 
   doctor(): Promise<{ profiles: unknown[]; droppedLedger: string[]; reconciled: string[] }> {

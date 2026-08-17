@@ -11,7 +11,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { PackageManagerService } from './index.ts'
 import type {
-  AdapterInitRequest, AiInstallRequest, InstallRequest, PackageManagerConfig, RestoreRequest, SyncRequest, ToggleRequest, UninstallRequest, UpdateCheckRequest, WorkspaceHistoryRequest, WorkspaceSwitchRequest,
+  AdapterInitRequest, AiInstallRequest, InstallRequest, LocalPluginToggleRequest, PackageManagerConfig, RestoreRequest, SyncRequest, ToggleRequest, UninstallRequest, UpdateCheckRequest, WorkspaceHistoryRequest, WorkspaceSwitchRequest,
 } from './types.ts'
 
 export const name = 'package-manager-web'
@@ -56,6 +56,8 @@ function handle(ctx: Context, service: PackageManagerService, apiPrefix: string)
       if (req.method === 'GET' && path === '/state') return send(res, 200, { ok: true, value: service.state() })
       if (req.method === 'GET' && path === '/local-plugins') return send(res, 200, { ok: true, value: service.localPlugins() })
       if (req.method === 'POST' && path === '/local-plugins/refresh') return dispatch(res, req, () => Promise.resolve(service.refreshLocalPlugins()))
+      if (req.method === 'POST' && path === '/local-plugins/release') return dispatch(res, req, body => service.releaseLocalPlugin(body as unknown as LocalPluginToggleRequest))
+      if (req.method === 'POST' && path === '/local-plugins/restore') return dispatch(res, req, body => service.restoreLocalPlugin(body as unknown as LocalPluginToggleRequest))
       if (req.method === 'GET' && path === '/workspace-history') {
         return send(res, 200, {
           ok: true,

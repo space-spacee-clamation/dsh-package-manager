@@ -194,6 +194,12 @@ export interface LocalPluginInfo {
   active: boolean
   /** True when this row was cached from a previous traversal and is not currently mounted. */
   cached: boolean
+  /** True when this row was explicitly released by the package manager. */
+  released: boolean
+}
+
+export interface LocalPluginToggleRequest {
+  name: string
 }
 
 export interface ManagerState {
