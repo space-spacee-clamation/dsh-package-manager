@@ -65,7 +65,7 @@ const panelStyle: CSSProperties = {
 const panelContentStyle: CSSProperties = {
   flex: 1,
   minHeight: 0,
-  overflowY: 'auto',
+  overflow: 'hidden',
 }
 
 const closeStyle: CSSProperties = {

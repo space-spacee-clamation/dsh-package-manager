@@ -27,8 +27,9 @@ const ACCENT_BORDER = '#C7D4FA'
 export const styles: Record<string, CSSProperties> = {
   workspaceRoot: {
     position: 'relative', display: 'flex', flexDirection: 'column', height: '100%',
-    minHeight: 500, maxWidth: 1200, width: '100%', margin: '0 auto', gap: 16,
-    padding: 16, background: CANVAS, color: TEXT, fontFamily: "'Noto Sans', 'Segoe UI', sans-serif",
+    minHeight: 0, maxWidth: 1200, width: '100%', margin: '0 auto', gap: 12,
+    padding: '12px 16px 14px', overflow: 'hidden', background: CANVAS, color: TEXT,
+    fontFamily: "'Noto Sans', 'Segoe UI', sans-serif",
   },
   settingsRoot: {
     display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 960, width: '100%',
@@ -83,8 +84,8 @@ export const styles: Record<string, CSSProperties> = {
   danger: { borderColor: '#F1B7B2', color: '#B3342B', background: '#FFF3F2' },
   dangerArmed: { borderColor: '#B3342B', color: '#ffffff', background: '#B3342B' },
   scroller: {
-    flex: 1, minHeight: 400, overflowY: 'auto', display: 'flex', flexDirection: 'column',
-    gap: 14, padding: '2px 4px 14px', scrollbarGutter: 'stable',
+    flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column',
+    gap: 12, padding: '2px 4px 12px', scrollbarGutter: 'stable',
   },
   footer: {
     flex: 'none', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
