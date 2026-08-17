@@ -282,13 +282,18 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
   const historyPaths = (state?.workspaceHistory ?? []).filter(path => path !== currentRoot && path !== defaultRoot)
   const historyCount = (state?.workspaceHistory ?? []).length
   const installedEntries = state?.entries ?? []
-  const enabledEntries = installedEntries.filter(entry => entry.disabled !== true)
-  const switchedOffEntries = installedEntries.filter(entry => entry.disabled === true)
-  const disabledEntries = state?.disabled ?? []
 
-  const resultPanel = (result !== null || logs.length > 0) ? (
-    <div style={styles.card}>
-      <h3 style={styles.title}>{t('result')}</h3>
+  const clearOutput = (): void => {
+    setLogs([])
+    setResult(null)
+  }
+
+  const resultOverlay = (result !== null || logs.length > 0) ? (
+    <div style={styles.resultOverlay}>
+      <div style={styles.titleRow}>
+        <h3 style={styles.title}>{t('result')}</h3>
+        <button type="button" style={styles.button} onClick={clearOutput}>{t('close')}</button>
+      </div>
       <div style={styles.logPanel}>
         {logs.map((line, index) => (
           <pre key={index} style={{ ...styles.log, color: line.level === 'error' ? '#e05a5a' : undefined }}>
@@ -331,6 +336,19 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
       >
         {t('webRefreshClear')}
       </button>
+    </div>
+  ) : null
+
+  const noticeStack = restartBanner !== null || webRefreshBanner !== null || error !== '' ? (
+    <div style={styles.noticeStack}>
+      {restartBanner}
+      {webRefreshBanner}
+      {error !== '' && (
+        <div style={styles.banner}>
+          <pre style={styles.error}>{error}</pre>
+          <button type="button" style={styles.button} onClick={() => setError('')}>{t('close')}</button>
+        </div>
+      )}
     </div>
   ) : null
 
@@ -407,27 +425,31 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
       {page === 'workspace' ? (
         <>
           <div style={styles.scroller}>
-            {restartBanner}
-            {webRefreshBanner}
-            {error !== '' && <pre style={styles.error}>{error}</pre>}
-            {resultPanel}
-
             <div style={styles.card}>
               <div style={styles.titleRow}>
                 <div style={styles.sectionTitle}>
                   <h3 style={styles.title}>{t('installedTitle')}</h3>
-                  <span style={styles.badge}>{enabledEntries.length}</span>
+                  <span style={styles.badge}>{installedEntries.length}</span>
                 </div>
                 <span style={styles.mono} title={currentRoot}>{currentRoot || t('workspaceDefault')}</span>
               </div>
-              {enabledEntries.length === 0 && <p style={styles.intro}>{t('empty')}</p>}
-              <div style={styles.list}>
-                {enabledEntries.map(entry => {
+              {installedEntries.length === 0 && <p style={styles.intro}>{t('empty')}</p>}
+              <div style={styles.pluginGrid}>
+                {installedEntries.map(entry => {
                   const key = deleteKey({ kind: 'installed', profile: entry.profile, id: entry.id })
+                  const off = entry.disabled === true
                   return (
-                    <div key={`${entry.profile}/${entry.id}`} style={{ ...styles.pluginCard, ...(entry.adapter === 'dsh-bundle' ? styles.hotCard : {}) }}>
+                    <div
+                      key={`${entry.profile}/${entry.id}`}
+                      style={{
+                        ...styles.pluginCard,
+                        ...(off ? styles.disabledCard : entry.adapter === 'dsh-bundle' ? styles.hotCard : {}),
+                      }}
+                    >
                       <div style={styles.pluginName}>
-                        <strong><span style={styles.statusDot} /> {entry.id}</strong>
+                        <strong>
+                          <span style={{ ...styles.statusDot, ...(off ? { background: '#9aa0a8' } : {}) }} /> {entry.id}
+                        </strong>
                         <span style={entry.adapter === 'dsh-bundle' ? styles.hotBadge : styles.badge}>
                           {entry.adapter === 'dsh-bundle' ? t('hotBadge') : t('customBadge')}
                         </span>
@@ -437,25 +459,23 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
                         <div style={styles.meta}>
                           <span style={styles.badge}>{entry.profile}</span>
                           {entry.ref !== '' && <span style={styles.mono}>{entry.ref}</span>}
-                          {entry.adapter === 'dsh-bundle' ? (
-                            <>
-                              {entry.packageName !== '' && <span style={styles.mono} title={entry.packageName}>{t('packageName')}: {entry.packageName}</span>}
-                              <span style={styles.hotBadge}>{t('patchBlock')}</span>
-                            </>
-                          ) : (
-                            entry.pluginEnvDir !== undefined && <span style={styles.mono} title={entry.pluginEnvDir}>{t('env')}</span>
+                          {entry.adapter === 'dsh-bundle' && entry.packageName !== '' && (
+                            <span style={styles.mono} title={entry.packageName}>{t('packageName')}: {entry.packageName}</span>
                           )}
                         </div>
                       </div>
                       <div style={styles.pluginActions}>
                         <button
                           type="button"
-                          style={styles.toggleOn}
-                          title={t('disable')}
+                          style={off ? styles.toggleOff : styles.toggleOn}
+                          title={off ? t('enable') : t('disable')}
                           disabled={busy}
-                          onClick={() => void run(() => api<UninstallResult>('/disable', { profile: entry.profile, id: entry.id }))}
+                          onClick={() => void run(() => api<UninstallResult | InstallResult>(
+                            off ? '/enable' : '/disable',
+                            { profile: entry.profile, id: entry.id },
+                          ))}
                         >
-                          {t('on')}
+                          {off ? t('off') : t('on')}
                         </button>
                         <button
                           type="button"
@@ -464,112 +484,6 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
                           onClick={() => requestDelete({ kind: 'installed', profile: entry.profile, id: entry.id })}
                         >
                           {confirmDelete === key ? t('deleteConfirm') : t('uninstall')}
-                        </button>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-
-            {switchedOffEntries.length > 0 && (
-              <div style={styles.card}>
-                <div style={styles.titleRow}>
-                  <div style={styles.sectionTitle}>
-                    <h3 style={styles.title}>{t('switchedOffTitle')}</h3>
-                    <span style={styles.badge}>{switchedOffEntries.length}</span>
-                  </div>
-                  <span style={styles.intro}>{t('switchedOffHint')}</span>
-                </div>
-                <div style={styles.list}>
-                  {switchedOffEntries.map(entry => {
-                    const key = deleteKey({ kind: 'installed', profile: entry.profile, id: entry.id })
-                    return (
-                      <div key={`${entry.profile}/${entry.id}`} style={{ ...styles.pluginCard, ...styles.disabledCard }}>
-                        <div style={styles.pluginName}>
-                          <strong><span style={{ ...styles.statusDot, background: '#b9b9b9' }} /> {entry.id}</strong>
-                          <span style={entry.adapter === 'dsh-bundle' ? styles.hotBadge : styles.badge}>
-                            {entry.adapter === 'dsh-bundle' ? t('hotBadge') : t('customBadge')}
-                          </span>
-                        </div>
-                        <div style={styles.pluginDesc}>
-                          <p style={styles.pluginSource}><span style={styles.label}>{t('pluginSummary')}: </span>{sourceSummary(entry.source, entry.ref)}</p>
-                          <div style={styles.meta}>
-                            <span style={styles.badge}>{entry.profile}</span>
-                            {entry.packageName !== '' && <span style={styles.mono}>{entry.packageName}</span>}
-                            {entry.adapter === 'dsh-bundle' && <span style={styles.hotBadge}>{t('patchBlock')}</span>}
-                          </div>
-                        </div>
-                        <div style={styles.pluginActions}>
-                          <button
-                            type="button"
-                            style={styles.toggleOff}
-                            title={t('enable')}
-                            disabled={busy}
-                            onClick={() => void run(() => api<InstallResult>('/enable', { profile: entry.profile, id: entry.id }))}
-                          >
-                            {t('off')}
-                          </button>
-                          <button
-                            type="button"
-                            style={{ ...styles.button, ...(confirmDelete === key ? styles.dangerArmed : styles.danger) }}
-                            disabled={busy}
-                            onClick={() => requestDelete({ kind: 'installed', profile: entry.profile, id: entry.id })}
-                          >
-                            {confirmDelete === key ? t('deleteConfirm') : t('uninstall')}
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            <div style={styles.card}>
-              <div style={styles.titleRow}>
-                <div style={styles.sectionTitle}>
-                  <h3 style={styles.title}>{t('disabledTitle')}</h3>
-                  <span style={styles.badge}>{disabledEntries.length}</span>
-                </div>
-                <span style={styles.intro}>{t('enable')} / {t('deleteDisabled')}</span>
-              </div>
-              {disabledEntries.length === 0 && <p style={styles.intro}>{t('disabledEmpty')}</p>}
-              <div style={styles.list}>
-                {disabledEntries.map(item => {
-                  const key = deleteKey({ kind: 'disabled', profile: item.profile, id: item.id })
-                  return (
-                    <div key={`${item.profile}/${item.id}`} style={{ ...styles.pluginCard, ...styles.disabledCard }}>
-                      <div style={styles.pluginName}>
-                        <strong><span style={{ ...styles.statusDot, background: '#b9b9b9', boxShadow: '0 0 0 3px rgba(185,185,185,0.10)' }} /> {item.id}</strong>
-                        <span style={item.adapter === 'dsh-bundle' ? styles.hotBadge : styles.badge}>
-                          {item.adapter === 'dsh-bundle' ? t('hotBadge') : t('customBadge')}
-                        </span>
-                      </div>
-                      <div style={styles.pluginDesc}>
-                        <p style={styles.pluginSource}><span style={styles.label}>{t('pluginSummary')}: </span>{sourceSummary(item.source, item.ref)}</p>
-                        <div style={styles.meta}>
-                          <span style={styles.badge}>{item.profile}</span>
-                          {item.ref !== '' && <span style={styles.mono}>{item.ref}</span>}
-                        </div>
-                      </div>
-                      <div style={styles.pluginActions}>
-                        <button
-                          type="button"
-                          style={styles.toggleOff}
-                          title={t('enable')}
-                          disabled={busy}
-                          onClick={() => void run(() => api<InstallResult>('/enable', { profile: item.profile, id: item.id }))}
-                        >
-                          {t('off')}
-                        </button>
-                        <button
-                          type="button"
-                          style={{ ...styles.button, ...(confirmDelete === key ? styles.dangerArmed : styles.danger) }}
-                          disabled={busy}
-                          onClick={() => requestDelete({ kind: 'disabled', profile: item.profile, id: item.id })}
-                        >
-                          {confirmDelete === key ? t('deleteConfirm') : t('deleteDisabled')}
                         </button>
                       </div>
                     </div>
@@ -607,7 +521,6 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
       ) : (
         <>
           <p style={styles.intro}>{t('workspaceHint')}</p>
-          {error !== '' && <pre style={styles.error}>{error}</pre>}
 
           <div style={styles.card}>
             <div style={styles.titleRow}>
@@ -864,9 +777,11 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
             </>
           )}
 
-          {resultPanel}
         </>
       )}
+
+      {noticeStack}
+      {resultOverlay}
     </div>
   )
 }
