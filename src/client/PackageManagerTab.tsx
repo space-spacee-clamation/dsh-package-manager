@@ -286,14 +286,48 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
   const clearOutput = (): void => {
     setLogs([])
     setResult(null)
+    setError('')
   }
 
-  const resultOverlay = (result !== null || logs.length > 0) ? (
+  const resultOverlay = (result !== null || logs.length > 0 || error !== '' || state?.restartNeeded === true || state?.webRefreshNeeded === true) ? (
     <div style={styles.resultOverlay}>
       <div style={styles.titleRow}>
         <h3 style={styles.title}>{t('result')}</h3>
         <button type="button" style={styles.button} onClick={clearOutput}>{t('close')}</button>
       </div>
+      {state?.restartNeeded === true && (
+        <div style={styles.banner}>
+          <span>{t('restart')}</span>
+          <button
+            type="button"
+            style={styles.button}
+            disabled={busy}
+            onClick={() => void run(async () => {
+              await api<null>('/restart/clear', {})
+              return { logs: [{ level: 'info', message: 'ok' }], dryRun: false } as AnyResult
+            })}
+          >
+            {t('restartClear')}
+          </button>
+        </div>
+      )}
+      {state?.webRefreshNeeded === true && (
+        <div style={styles.banner}>
+          <span>{t('webRefresh')}</span>
+          <button
+            type="button"
+            style={styles.button}
+            disabled={busy}
+            onClick={() => void run(async () => {
+              await api<null>('/web-refresh/clear', {})
+              return { logs: [{ level: 'info', message: 'ok' }], dryRun: false } as AnyResult
+            })}
+          >
+            {t('webRefreshClear')}
+          </button>
+        </div>
+      )}
+      {error !== '' && <pre style={styles.error}>{error}</pre>}
       <div style={styles.logPanel}>
         {logs.map((line, index) => (
           <pre key={index} style={{ ...styles.log, color: line.level === 'error' ? '#e05a5a' : undefined }}>
@@ -302,53 +336,6 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
         ))}
         {result !== null && <pre style={styles.log}>{resultSummary(result)}</pre>}
       </div>
-    </div>
-  ) : null
-
-  const restartBanner = state?.restartNeeded === true ? (
-    <div style={styles.banner}>
-      <span>{t('restart')}</span>
-      <button
-        type="button"
-        style={styles.button}
-        disabled={busy}
-        onClick={() => void run(async () => {
-          await api<null>('/restart/clear', {})
-          return { logs: [{ level: 'info', message: 'ok' }], dryRun: false } as AnyResult
-        })}
-      >
-        {t('restartClear')}
-      </button>
-    </div>
-  ) : null
-
-  const webRefreshBanner = state?.webRefreshNeeded === true ? (
-    <div style={styles.banner}>
-      <span>{t('webRefresh')}</span>
-      <button
-        type="button"
-        style={styles.button}
-        disabled={busy}
-        onClick={() => void run(async () => {
-          await api<null>('/web-refresh/clear', {})
-          return { logs: [{ level: 'info', message: 'ok' }], dryRun: false } as AnyResult
-        })}
-      >
-        {t('webRefreshClear')}
-      </button>
-    </div>
-  ) : null
-
-  const noticeStack = restartBanner !== null || webRefreshBanner !== null || error !== '' ? (
-    <div style={styles.noticeStack}>
-      {restartBanner}
-      {webRefreshBanner}
-      {error !== '' && (
-        <div style={styles.banner}>
-          <pre style={styles.error}>{error}</pre>
-          <button type="button" style={styles.button} onClick={() => setError('')}>{t('close')}</button>
-        </div>
-      )}
     </div>
   ) : null
 
@@ -782,7 +769,6 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
         </>
       )}
 
-      {noticeStack}
       {resultOverlay}
     </div>
   )

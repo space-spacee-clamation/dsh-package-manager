@@ -16,7 +16,7 @@ const NEUTRAL_100 = 'hsl(0, 0%, 93%)'
 const NEUTRAL_0 = 'hsl(200, 60%, 99%)'
 const RED_500 = 'hsl(3, 71%, 56%)'
 const RED_400 = 'hsl(3, 86%, 64%)'
-const CANVAS = 'linear-gradient(180deg, #EBF2FC 0%, #EEF8F9 100%)'
+const CANVAS = 'linear-gradient(180deg, #F5F6F8 0%, #ECEEF1 100%)'
 const BORDER = '#D6D9E6'
 const TEXT = NEUTRAL_900
 const MUTED = 'rgba(39, 49, 86, 0.62)'
@@ -175,9 +175,5 @@ export const styles: Record<string, CSSProperties> = {
     background: '#ffffff', color: TEXT, padding: 14,
     display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 320, overflow: 'hidden',
     boxShadow: '0 6px 18px rgba(30,50,100,0.12)',
-  },
-  noticeStack: {
-    position: 'absolute', top: 12, right: 16, zIndex: 40,
-    display: 'flex', flexDirection: 'column', gap: 8, width: 390, maxWidth: 'calc(100% - 32px)',
   },
 }

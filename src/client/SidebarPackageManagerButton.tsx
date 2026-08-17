@@ -48,16 +48,17 @@ const overlayStyle: CSSProperties = {
 
 const panelStyle: CSSProperties = {
   position: 'absolute',
-  top: 20,
-  right: 20,
-  bottom: 20,
-  left: 232,
+  top: '50%',
+  left: '50%',
+  width: 'min(1120px, calc(100vw - 48px))',
+  height: 'min(760px, calc(100vh - 48px))',
+  transform: 'translate(-50%, -50%)',
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
   border: '1px solid #D6D9E6',
   borderRadius: 20,
-  background: 'linear-gradient(180deg, #EBF2FC 0%, #EEF8F9 100%)',
+  background: 'linear-gradient(180deg, #F5F6F8 0%, #ECEEF1 100%)',
   color: 'hsl(227, 75%, 14%)',
 }
 
