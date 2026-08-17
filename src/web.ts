@@ -67,6 +67,7 @@ function handle(ctx: Context, service: PackageManagerService, apiPrefix: string)
         return send(res, 200, { ok: true, value: { pid: process.pid, build: 'bat-bare-fix-2' } })
       }
       if (req.method === 'GET' && path === '/state') return send(res, 200, { ok: true, value: service.state() })
+      if (req.method === 'GET' && path === '/local-plugins') return send(res, 200, { ok: true, value: service.localPlugins() })
       if (req.method === 'GET' && path === '/workspace-history') {
         return send(res, 200, {
           ok: true,

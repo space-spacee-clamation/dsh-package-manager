@@ -61,6 +61,7 @@ diff——这就是官方热重载路径，新增行即挂载，删行即卸载�
   安装/卸载步骤；这类插件不承诺热重载，成功后写 restart 提示。
 - **requirements 复原与同步**：`deps.yaml` 按 id 做最小差集
   `install / keep / update / uninstall / disable / enable`。
+- **本地运行插件发现**：监听 Cordis `internal/plugin`（注册激活前）并遍历已存在 fiber，自动展示非系统本地插件。
 - **CLI + Web + API**：`dpm`、`/pm-api/*` 与程序化 API 共用同一 core。
 - **装前校验**：拒绝 `workspace:` 依赖、非 ESM、缺 `dsh.bundle.patch`、未构建
   入口的包，任何 profile 修改之前失败。

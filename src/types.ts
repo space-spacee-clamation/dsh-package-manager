@@ -163,6 +163,16 @@ export interface WorkspaceSwitchRequest {
 }
 
 /** Read-only state view the Web UI renders. */
+/** One plugin fiber discovered live in this DSH process. */
+export interface LocalPluginInfo {
+  /** Plugin display name. */
+  name: string
+  /** Cordis fiber id, null once disposed. */
+  uid: number | null
+  /** FiberState numeric value. */
+  state: number
+}
+
 export interface ManagerState {
   home: string
   /** Resolved root of per-plugin workspaces (config.workspaceRoot or the default). */
@@ -184,6 +194,8 @@ export interface ManagerState {
   webRefreshNeeded: boolean
   profiles: ProfileState[]
   entries: LedgerEntry[]
+  /** Live non-system plugin fibers observed by the Cordis service; empty in headless core/CLI. */
+  localPlugins: LocalPluginInfo[]
   disabled: DisabledEntry[]
   config: PackageManagerConfig
 }

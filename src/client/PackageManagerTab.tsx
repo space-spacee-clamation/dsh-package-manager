@@ -282,6 +282,7 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
   const historyPaths = (state?.workspaceHistory ?? []).filter(path => path !== currentRoot && path !== defaultRoot)
   const historyCount = (state?.workspaceHistory ?? []).length
   const installedEntries = state?.entries ?? []
+  const localPlugins = state?.localPlugins ?? []
 
   const clearOutput = (): void => {
     setLogs([])
@@ -479,6 +480,24 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
                   )
                 })}
               </div>
+            </div>
+            <div style={styles.card}>
+              <div style={styles.titleRow}>
+                <div style={styles.sectionTitle}>
+                  <h3 style={styles.title}>{t('localPluginsTitle')}</h3>
+                  <span style={styles.badge}>{localPlugins.length}</span>
+                </div>
+                <span style={styles.intro}>{t('localPluginsHint')}</span>
+              </div>
+              {localPlugins.length === 0 ? (
+                <p style={styles.intro}>{t('localPluginsEmpty')}</p>
+              ) : (
+                <div style={styles.row}>
+                  {localPlugins.map(item => (
+                    <span key={`${item.name}-${String(item.uid)}`} style={styles.badge}>{item.name}</span>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

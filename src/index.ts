@@ -15,6 +15,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { dispatchAiInstall } from './ai.ts'
+import { LocalPluginRegistry } from './localPlugins.ts'
 import { createHost } from './hostAsync.ts'
 import { PackageManager } from './manager.ts'
 import { buildRestartScript, portOf, readLaunch, recordLaunch, spawnRestarter } from './launch.ts'
@@ -23,7 +24,7 @@ import { mkdirSync } from 'node:fs'
 import { resolveHome, runtimeRoot } from './paths.ts'
 import type {
   AdapterInitRequest, AdapterInitResult, AiInstallRequest, AiInstallResult, DisabledEntry, InstallRequest, InstallResult,
-  ManagerState, PackageManagerConfig, RestartResult, RestoreRequest, RestoreResult, SyncRequest, ToggleRequest, UninstallRequest, UninstallResult,
+  LocalPluginInfo, ManagerState, PackageManagerConfig, RestartResult, RestoreRequest, RestoreResult, SyncRequest, ToggleRequest, UninstallRequest, UninstallResult,
 } from './types.ts'
 
 export { PackageManager, createPackageManager, idFromSource, type PackageManagerOptions } from './manager.ts'
@@ -56,6 +57,7 @@ export class PackageManagerService extends Service {
   readonly manager: PackageManager
   readonly apiPrefix: string
   readonly home: string
+  private readonly localPluginRegistry: LocalPluginRegistry
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'packageManager')
@@ -66,6 +68,7 @@ export class PackageManagerService extends Service {
       ...(config.home === '' ? {} : { home: config.home }),
       host: createHost(ctx),
     })
+    this.localPluginRegistry = new LocalPluginRegistry(ctx)
     // Record how this process was started so the restart tool can relaunch it
     // verbatim after a graceful exit (no manual process killing needed).
     recordLaunch(home, portOf())
@@ -87,7 +90,12 @@ export class PackageManagerService extends Service {
   }
 
   state(): ManagerState {
-    return this.manager.state()
+    return { ...this.manager.state(), localPlugins: this.localPluginRegistry.list() }
+  }
+
+  /** Live non-system plugins discovered from Cordis fibers. */
+  localPlugins(): LocalPluginInfo[] {
+    return this.localPluginRegistry.list()
   }
 
   /**

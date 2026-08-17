@@ -105,7 +105,8 @@ CLI 使用纯 core：dsh-bundle 安装同样写 profile `cordis.patch.yml` 托�
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/pm-api/state` | 读取 home / workspaceRoot / workspaceDefault / profiles / entries / disabled / config |
+| `GET` | `/pm-api/state` | 读取 home / workspaceRoot / workspaceDefault / profiles / entries / disabled / localPlugins / config |
+| `GET` | `/pm-api/local-plugins` | 读取当前进程发现的非系统本地插件 fiber |
 | `GET` | `/pm-api/config` | 读取工作区根目录、包存储与自动同步配置 |
 | `POST` | `/pm-api/config` | 保存配置（`PackageManagerConfig`） |
 | `POST` | `/pm-api/ai-install` | 创建插件工作区 + AI 会话并派发安装（`AiInstallRequest`） |

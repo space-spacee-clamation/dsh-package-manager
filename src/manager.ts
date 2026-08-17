@@ -124,6 +124,7 @@ export class PackageManager {
       webRefreshNeeded: existsSync(this.webRefreshMarker()),
       profiles,
       entries: listEntries(loadEffectiveLedger(this.home)),
+      localPlugins: [],
       disabled: loadDisabled(this.home),
       config: loadConfig(this.home),
     }
