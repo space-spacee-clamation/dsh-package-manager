@@ -27,8 +27,8 @@ const ACCENT_BORDER = '#C7D4FA'
 export const styles: Record<string, CSSProperties> = {
   workspaceRoot: {
     position: 'relative', display: 'flex', flexDirection: 'column', height: '100%',
-    minHeight: 0, maxWidth: 1200, width: '100%', margin: '0 auto', gap: 12,
-    padding: '12px 16px 14px', overflow: 'hidden', background: CANVAS, color: TEXT,
+    minHeight: 0, maxWidth: 1320, width: '100%', margin: '0 auto', gap: 16,
+    padding: '20px 24px 22px', overflow: 'hidden', background: CANVAS, color: TEXT,
     fontFamily: "'Noto Sans', 'Segoe UI', sans-serif",
   },
   settingsRoot: {
@@ -50,7 +50,7 @@ export const styles: Record<string, CSSProperties> = {
   intro: { color: MUTED, lineHeight: 1.7, margin: 0, fontSize: 13 },
   pathCard: {
     flex: 'none', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-    padding: '14px 16px', border: `1px solid ${BORDER}`, borderRadius: 20,
+    padding: '16px 20px', border: `1px solid ${BORDER}`, borderRadius: 20,
     background: NEUTRAL_0, boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
   },
   pathArea: { display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 560px', minWidth: 340, flexWrap: 'wrap' },
@@ -85,7 +85,7 @@ export const styles: Record<string, CSSProperties> = {
   dangerArmed: { borderColor: '#B3342B', color: '#ffffff', background: '#B3342B' },
   scroller: {
     flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column',
-    gap: 12, padding: '2px 4px 12px', scrollbarGutter: 'stable',
+    gap: 16, padding: '2px 6px 16px', scrollbarGutter: 'stable',
   },
   footer: {
     flex: 'none', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
@@ -94,7 +94,7 @@ export const styles: Record<string, CSSProperties> = {
   },
   footerInputWrap: { flex: '1 1 340px', display: 'flex', flexDirection: 'column', gap: 5, minWidth: 230 },
   card: {
-    border: `1px solid ${BORDER}`, borderRadius: 20, padding: 18,
+    border: `1px solid ${BORDER}`, borderRadius: 20, padding: 20,
     display: 'flex', flexDirection: 'column', gap: 14, background: NEUTRAL_0,
     boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
   },
@@ -116,12 +116,12 @@ export const styles: Record<string, CSSProperties> = {
   },
   pluginGrid: {
     display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-    gap: 14, alignItems: 'stretch',
+    gap: 18, alignItems: 'stretch',
   },
   list: { display: 'flex', flexDirection: 'column', gap: 10 },
   pluginCard: {
     border: `1px solid ${BORDER}`, borderRadius: 20, padding: '16px 16px 14px',
-    display: 'flex', flexDirection: 'column', gap: 12, minHeight: 168,
+    display: 'flex', flexDirection: 'column', gap: 14, minHeight: 184,
     background: '#ffffff', boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
   },
   hotCard: { borderColor: ACCENT_BORDER },
