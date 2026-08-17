@@ -124,8 +124,8 @@ export const styles: Record<string, CSSProperties> = {
     padding: '12px 12px', border: `1px solid ${BORDER}`, borderRadius: 14,
     background: NEUTRAL_0,
   },
-  localTop: { display: 'flex', alignItems: 'flex-start', gap: 8, minWidth: 0 },
-  localName: { minWidth: 0, fontWeight: 750, fontSize: 13, overflowWrap: 'anywhere' },
+  localTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minWidth: 0 },
+  localName: { minWidth: 0, flex: 1, fontWeight: 750, fontSize: 13, overflowWrap: 'anywhere' },
   pluginGrid: {
     display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
     gap: 18, alignItems: 'stretch',

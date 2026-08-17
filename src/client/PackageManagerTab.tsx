@@ -517,19 +517,22 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
                       <div style={styles.localTop}>
                         <span style={{ ...styles.statusDot, ...(item.active ? {} : { background: '#9aa0a8' }) }} />
                         <span style={styles.localName}>{item.name}</span>
+                        <button
+                          type="button"
+                          style={item.active ? styles.toggleOn : styles.toggleOff}
+                          disabled={busy}
+                          onClick={() => void run(() => api<LocalPluginInfo>(
+                            item.active ? '/local-plugins/release' : '/local-plugins/restore',
+                            { name: item.name },
+                          ))}
+                        >
+                          {item.active ? t('on') : t('off')}
+                        </button>
                       </div>
-                      <span style={item.active ? styles.hotBadge : styles.badge}>{item.active ? t('on') : item.released ? t('localReleased') : t('localCached')}</span>
-                      <button
-                        type="button"
-                        style={item.released || !item.active ? styles.toggleOn : styles.toggleOff}
-                        disabled={busy}
-                        onClick={() => void run(() => api<LocalPluginInfo>(
-                          item.released || !item.active ? '/local-plugins/restore' : '/local-plugins/release',
-                          { name: item.name },
-                        ))}
-                      >
-                        {item.released || !item.active ? t('localRestore') : t('localRelease')}
-                      </button>
+                      <div style={styles.row}>
+                        <span style={item.active ? styles.hotBadge : styles.badge}>{item.active ? t('localRunning') : item.released ? t('localReleased') : t('localCached')}</span>
+                        {item.uid !== null && <span style={styles.mono}>fiber {String(item.uid)}</span>}
+                      </div>
                     </div>
                   ))}
                 </div>
