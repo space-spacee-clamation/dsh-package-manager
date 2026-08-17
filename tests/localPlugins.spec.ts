@@ -8,7 +8,20 @@ describe('LocalPluginRegistry', () => {
     const registry = new LocalPluginRegistry(ctx)
     const fiber = ctx.plugin({ name: 'local-fixture', apply() {} })
     await fiber
-    expect(registry.list().map(item => item.name)).toContain('local-fixture')
+    const info = registry.list().find(item => item.name === 'local-fixture')
+    expect(info?.active).toBe(true)
+    await ctx.fiber.dispose()
+  })
+
+  it('refresh keeps previously observed plugins in cache when their fiber is gone', async () => {
+    const ctx = new Context()
+    const fiber = ctx.plugin({ name: 'cached-local', apply() {} })
+    await fiber
+    const registry = new LocalPluginRegistry(ctx)
+    await fiber.dispose()
+    const info = registry.refresh().find(item => item.name === 'cached-local')
+    expect(info?.cached).toBe(true)
+    expect(info?.active).toBe(false)
     await ctx.fiber.dispose()
   })
 

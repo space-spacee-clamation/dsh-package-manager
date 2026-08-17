@@ -64,7 +64,6 @@ describe('PackageManager integration (real pnpm)', () => {
 
     const state = manager.state()
     expect(state.entries.map(entry => entry.id)).toContain('fixture')
-    expect(state.restartNeeded).toBe(false)
 
     const removed = await manager.uninstall({ profile: 'web', id: 'fixture' })
     expect(removed.hotUnmounted).toBe(true)

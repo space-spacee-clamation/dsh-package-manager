@@ -99,7 +99,7 @@ dpm sync-configured
 
 CLI 使用纯 core：dsh-bundle 安装同样写 profile `cordis.patch.yml` 托管块。
 如果 DSH 正在运行，宿主 watcher 会直接热挂载；如果 DSH 未运行，下次启动由
-用户层托管块恢复，无需 restart marker。只有 custom adapter 会写 restart 提示。
+用户层托管块恢复。custom adapter 没有热重载保证。
 
 ## Web API
 
@@ -121,7 +121,6 @@ CLI 使用纯 core：dsh-bundle 安装同样写 profile `cordis.patch.yml` 托�
 | `POST` | `/pm-api/sync` | 拉取 requirements 仓库并复原 |
 | `POST` | `/pm-api/sync-configured` | 按已保存配置 clone / pull 并复原 |
 | `POST` | `/pm-api/adapter-init` | 探测源码并生成 adapter 骨架 |
-| `POST` | `/pm-api/restart/clear` | 清除“需要重启”提示 |
 
 统一响应：
 

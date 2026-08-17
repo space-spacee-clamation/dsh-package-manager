@@ -9,7 +9,7 @@
 
 import { useEffect, useState, type FormEvent, type ReactElement } from 'react'
 import type {
-  AdapterInitResult, AiInstallResult, DisabledEntry, InstallResult, ManagerState, OperationLog, PackageManagerConfig,
+  AdapterInitResult, AiInstallResult, DisabledEntry, InstallResult, LocalPluginInfo, ManagerState, OperationLog, PackageManagerConfig,
   RestoreResult, UninstallResult, UpdateCheckResult,
 } from '../types.ts'
 import type { LocaleKey } from './locales.ts'
@@ -19,7 +19,7 @@ export interface PackageManagerTabProps {
   t: (key: LocaleKey) => string
 }
 
-type AnyResult = InstallResult | UninstallResult | RestoreResult | AdapterInitResult | PackageManagerConfig | AiInstallResult | DisabledEntry | UpdateCheckResult
+type AnyResult = InstallResult | UninstallResult | RestoreResult | AdapterInitResult | PackageManagerConfig | AiInstallResult | DisabledEntry | UpdateCheckResult | LocalPluginInfo[]
 type Page = 'workspace' | 'settings'
 type DeleteTarget = { kind: 'installed' | 'disabled'; profile: string; id: string }
 
@@ -290,28 +290,12 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
     setError('')
   }
 
-  const resultOverlay = (result !== null || logs.length > 0 || error !== '' || state?.restartNeeded === true || state?.webRefreshNeeded === true) ? (
+  const resultOverlay = (result !== null || logs.length > 0 || error !== '' || state?.webRefreshNeeded === true) ? (
     <div style={styles.resultOverlay}>
       <div style={styles.titleRow}>
         <h3 style={styles.title}>{t('result')}</h3>
         <button type="button" style={styles.button} onClick={clearOutput}>{t('close')}</button>
       </div>
-      {state?.restartNeeded === true && (
-        <div style={styles.banner}>
-          <span>{t('restart')}</span>
-          <button
-            type="button"
-            style={styles.button}
-            disabled={busy}
-            onClick={() => void run(async () => {
-              await api<null>('/restart/clear', {})
-              return { logs: [{ level: 'info', message: 'ok' }], dryRun: false } as AnyResult
-            })}
-          >
-            {t('restartClear')}
-          </button>
-        </div>
-      )}
       {state?.webRefreshNeeded === true && (
         <div style={styles.banner}>
           <span>{t('webRefresh')}</span>
@@ -500,14 +484,24 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
                   <h3 style={styles.title}>{t('localPluginsTitle')}</h3>
                   <span style={styles.badge}>{localPlugins.length}</span>
                 </div>
-                <span style={styles.intro}>{t('localPluginsHint')}</span>
+                <button
+                  type="button"
+                  style={styles.button}
+                  disabled={busy}
+                  onClick={() => void run(() => api<LocalPluginInfo[]>('/local-plugins/refresh', {}))}
+                >
+                  {t('localPluginsRefresh')}
+                </button>
               </div>
+              <span style={styles.intro}>{t('localPluginsHint')}</span>
               {localPlugins.length === 0 ? (
                 <p style={styles.intro}>{t('localPluginsEmpty')}</p>
               ) : (
                 <div style={styles.row}>
                   {localPlugins.map(item => (
-                    <span key={`${item.name}-${String(item.uid)}`} style={styles.badge}>{item.name}</span>
+                    <span key={`${item.name}-${String(item.uid)}`} style={{ ...styles.badge, ...(item.active ? styles.hotBadge : item.cached ? { opacity: 0.55 } : {}) }}>
+                      <span style={{ ...styles.statusDot, ...(item.active ? {} : { background: '#9aa0a8' }) }} /> {item.name}
+                    </span>
                   ))}
                 </div>
               )}

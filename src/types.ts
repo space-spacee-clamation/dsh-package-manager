@@ -190,6 +190,10 @@ export interface LocalPluginInfo {
   uid: number | null
   /** FiberState numeric value. */
   state: number
+  /** True when the fiber is currently ACTIVE. */
+  active: boolean
+  /** True when this row was cached from a previous traversal and is not currently mounted. */
+  cached: boolean
 }
 
 export interface ManagerState {
@@ -204,7 +208,6 @@ export interface ManagerState {
   reconciling: boolean
   /** Error from the last workspace switch, empty when the last switch succeeded. */
   switchError: string
-  restartNeeded: boolean
   /**
    * True when a bundle with a client face (`dsh.client`) was installed or
    * removed: the host's client-module graph already updated live, but open
@@ -267,19 +270,6 @@ export interface SyncRequest {
   file?: string
   modes?: string[]
   dryRun?: boolean
-}
-
-/** Result of scheduling a backend restart. */
-export interface RestartResult {
-  restarting: boolean
-  /** The relaunch command the restarter will run. */
-  command: string
-  /** Log file the relaunched process appends to. */
-  log: string
-  /** Restarter process id. */
-  pid: number
-  /** Port the restarter waits to free before relaunching. */
-  port: number
 }
 
 export interface AdapterInitRequest {

@@ -18,13 +18,10 @@ import { dispatchAiInstall } from './ai.ts'
 import { LocalPluginRegistry } from './localPlugins.ts'
 import { createHost } from './hostAsync.ts'
 import { PackageManager } from './manager.ts'
-import { buildRestartScript, portOf, readLaunch, recordLaunch, spawnRestarter } from './launch.ts'
-import { dirname, join } from 'node:path'
-import { mkdirSync } from 'node:fs'
-import { resolveHome, runtimeRoot } from './paths.ts'
+import { resolveHome } from './paths.ts'
 import type {
   AdapterInitRequest, AdapterInitResult, AiInstallRequest, AiInstallResult, DisabledEntry, InstallRequest, InstallResult,
-  LocalPluginInfo, ManagerState, PackageManagerConfig, RestartResult, RestoreRequest, RestoreResult, SyncRequest, ToggleRequest, UninstallRequest, UninstallResult,
+  LocalPluginInfo, ManagerState, PackageManagerConfig, RestoreRequest, RestoreResult, SyncRequest, ToggleRequest, UninstallRequest, UninstallResult,
   UpdateCheckRequest, UpdateCheckResult,
 } from './types.ts'
 
@@ -70,9 +67,6 @@ export class PackageManagerService extends Service {
       host: createHost(ctx),
     })
     this.localPluginRegistry = new LocalPluginRegistry(ctx)
-    // Record how this process was started so the restart tool can relaunch it
-    // verbatim after a graceful exit (no manual process killing needed).
-    recordLaunch(home, portOf())
     // Shutdown notices: the user asked for a visible "ending" signal.
     ctx.effect(() => () => {
       console.log('[package-manager] DSH backend shutting down...')
@@ -99,23 +93,9 @@ export class PackageManagerService extends Service {
     return this.localPluginRegistry.list()
   }
 
-  /**
-   * Schedule a backend restart: spawn a detached restarter that waits for
-   * this process to release its port, then relaunches with the recorded (or
-   * provided) command. The caller exits this process gracefully after the
-   * response is sent — no manual process killing required.
-   */
-  restart(command?: string): RestartResult {
-    const record = readLaunch(this.home)
-    const cmd = command !== undefined && command !== '' ? command : record?.command ?? ''
-    if (cmd === '') {
-      throw new Error('no restart command recorded and none provided — pass a command')
-    }
-    const port = record?.port ?? 3080
-    const log = join(runtimeRoot(this.home), 'restart.log')
-    mkdirSync(dirname(log), { recursive: true })
-    const pid = spawnRestarter(buildRestartScript(port, cmd, log))
-    return { restarting: true, command: cmd, log, pid, port }
+  /** Re-walk Cordis fibers and refresh the cached local-plugin view. */
+  refreshLocalPlugins(): LocalPluginInfo[] {
+    return this.localPluginRegistry.refresh()
   }
 
   doctor(): Promise<{ profiles: unknown[]; droppedLedger: string[]; reconciled: string[] }> {
@@ -168,10 +148,6 @@ export class PackageManagerService extends Service {
 
   setConfig(config: PackageManagerConfig): PackageManagerConfig {
     return this.manager.setConfig(config)
-  }
-
-  clearRestartMarker(): void {
-    this.manager.clearRestartMarker()
   }
 
   clearWebRefreshMarker(): void {

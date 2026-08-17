@@ -57,7 +57,6 @@ export interface PackageManagerOptions {
   host?: PackageManagerHost
 }
 
-const RESTART_MARKER = 'restart-needed'
 const WEB_REFRESH_MARKER = 'web-refresh-needed'
 const DEPS_FILENAME = 'deps.yaml'
 
@@ -122,7 +121,6 @@ export class PackageManager {
       workspaceHistory: loadWorkspaceHistory(this.home),
       reconciling: this.reconciling,
       switchError: this.switchError,
-      restartNeeded: existsSync(this.restartMarker()),
       webRefreshNeeded: existsSync(this.webRefreshMarker()),
       profiles,
       entries: listEntries(loadEffectiveLedger(this.home)),
@@ -130,10 +128,6 @@ export class PackageManager {
       disabled: loadDisabled(this.home),
       config: loadConfig(this.home),
     }
-  }
-
-  clearRestartMarker(): void {
-    rmSync(this.restartMarker(), { force: true })
   }
 
   clearWebRefreshMarker(): void {
@@ -317,9 +311,8 @@ export class PackageManager {
       setEntry(ledger, entry)
       saveLedger(this.home, ledger)
       this.clearDisabled(profile, id)
-      // Custom adapters may write profile files the boot loader reads; a
-      // dsh-bundle install is hot via its patch block, a custom one is not.
-      this.touchRestart()
+      // Custom adapters may write arbitrary files; hot-reload guarantees only
+      // apply to dsh-bundle patch rows.
       log('info', `installed ${id} in profile ${profile} through custom adapter (${records.length} steps recorded)`)
       return {
         profile,
@@ -424,7 +417,6 @@ export class PackageManager {
     saveLedger(this.home, ledger)
     removeDisabledEntry(this.home, entry.profile, entry.id)
     rmSync(workDir, { recursive: true, force: true })
-    if (!hotUnmounted) this.touchRestart()
     this.noteClientFace(entry, log)
     log('info', `uninstalled ${entry.id} from profile ${entry.profile}`)
     return {
@@ -992,15 +984,6 @@ export class PackageManager {
     const prefix = source.startsWith('link:') ? 'link:' : source.startsWith('file:') ? 'file:' : 'file:'
     const raw = source.replace(/^(?:link|file):/, '')
     return `${prefix}${resolve(raw)}`
-  }
-
-  private restartMarker(): string {
-    return join(pmRoot(this.home), RESTART_MARKER)
-  }
-
-  private touchRestart(): void {
-    mkdirSync(pmRoot(this.home), { recursive: true })
-    writeFileSync(this.restartMarker(), new Date().toISOString() + '\n')
   }
 
   private webRefreshMarker(): string {

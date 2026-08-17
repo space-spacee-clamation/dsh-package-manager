@@ -7,7 +7,7 @@ Loader API，而是完全交给宿主启动时已经挂好的 `watchUserPatches`
 
 > One pipeline only: profile dependency install + a managed block in
 > `cordis.patch.yml`. The host's own `watchUserPatches` diffs the root Include
-> and hot-mounts/unmounts the rows. No restart for dsh-bundle plugins.
+> and hot-mounts/unmounts the rows. dsh-bundle plugins never need a restart.
 
 ## 为什么这样设计
 
@@ -60,7 +60,7 @@ diff——这就是官方热重载路径，新增行即挂载，删行即卸载�
 - **检查更新**：对 git 源插件执行 `git ls-remote`，有更新时自动同步
   mirror 并完成热更新。
 - **无 bundle 插件仍可用 custom adapter**：声明式 YAML adapter 执行任意
-  安装/卸载步骤；这类插件不承诺热重载，成功后写 restart 提示。
+  安装/卸载步骤；这类插件没有 dsh-bundle 的热重载保证。
 - **requirements 复原与同步**：`deps.yaml` 按 id 做最小差集
   `install / keep / update / uninstall / disable / enable`。
 - **本地运行插件发现**：监听 Cordis `internal/plugin`（注册激活前）并遍历已存在 fiber，自动展示非系统本地插件。

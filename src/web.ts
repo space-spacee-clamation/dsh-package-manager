@@ -32,19 +32,6 @@ export function apply(ctx: Context): void {
 type Handler = (req: IncomingMessage, res: ServerResponse) => Promise<void>
 
 /**
- * Exit the backend process gracefully after a restart response: prefer the
- * host's cmdline exit (runs the full dispose chain), fall back to a hard exit.
- */
-function exitBackend(ctx: Context): void {
-  const cmdline = ctx.get('cmdline') as { exit?: (code: number) => void } | undefined
-  if (cmdline?.exit !== undefined) {
-    cmdline.exit(0)
-  } else {
-    setTimeout(() => process.exit(0), 200)
-  }
-}
-
-/**
  * Strip the registered prefix from a pathname the webserver routed here.
  * Prefix routes receive the full pathname, so `/pm-api/state` becomes
  * `/state` and a bare `/pm-api` becomes `/`.
@@ -68,6 +55,7 @@ function handle(ctx: Context, service: PackageManagerService, apiPrefix: string)
       }
       if (req.method === 'GET' && path === '/state') return send(res, 200, { ok: true, value: service.state() })
       if (req.method === 'GET' && path === '/local-plugins') return send(res, 200, { ok: true, value: service.localPlugins() })
+      if (req.method === 'POST' && path === '/local-plugins/refresh') return dispatch(res, req, () => Promise.resolve(service.refreshLocalPlugins()))
       if (req.method === 'GET' && path === '/workspace-history') {
         return send(res, 200, {
           ok: true,
@@ -86,20 +74,6 @@ function handle(ctx: Context, service: PackageManagerService, apiPrefix: string)
       if (req.method === 'POST' && path === '/check-update') return dispatch(res, req, body => service.checkUpdate(body as unknown as UpdateCheckRequest))
       if (req.method === 'POST' && path === '/disable') return dispatch(res, req, body => service.disable(body as unknown as ToggleRequest))
       if (req.method === 'POST' && path === '/enable') return dispatch(res, req, body => service.enable(body as unknown as ToggleRequest))
-      if (req.method === 'POST' && path === '/restart') {
-        assertCsrf(req)
-        const body = await readBody(req)
-        const result = service.restart(typeof body.command === 'string' ? body.command : undefined)
-        // Answer first, then exit: the restarter is already up and waits for
-        // the port to free.
-        setTimeout(() => exitBackend(ctx), 400)
-        return send(res, 200, { ok: true, value: result })
-      }
-      if (req.method === 'POST' && path === '/restart/clear') {
-        assertCsrf(req)
-        service.clearRestartMarker()
-        return send(res, 200, { ok: true, value: null })
-      }
       if (req.method === 'POST' && path === '/web-refresh/clear') {
         assertCsrf(req)
         service.clearWebRefreshMarker()

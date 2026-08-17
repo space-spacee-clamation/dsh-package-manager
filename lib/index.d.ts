@@ -176,6 +176,10 @@ interface LocalPluginInfo {
   uid: number | null;
   /** FiberState numeric value. */
   state: number;
+  /** True when the fiber is currently ACTIVE. */
+  active: boolean;
+  /** True when this row was cached from a previous traversal and is not currently mounted. */
+  cached: boolean;
 }
 interface ManagerState {
   home: string;
@@ -189,7 +193,6 @@ interface ManagerState {
   reconciling: boolean;
   /** Error from the last workspace switch, empty when the last switch succeeded. */
   switchError: string;
-  restartNeeded: boolean;
   /**
    * True when a bundle with a client face (`dsh.client`) was installed or
    * removed: the host's client-module graph already updated live, but open
@@ -247,18 +250,6 @@ interface SyncRequest {
   file?: string;
   modes?: string[];
   dryRun?: boolean;
-}
-/** Result of scheduling a backend restart. */
-interface RestartResult {
-  restarting: boolean;
-  /** The relaunch command the restarter will run. */
-  command: string;
-  /** Log file the relaunched process appends to. */
-  log: string;
-  /** Restarter process id. */
-  pid: number;
-  /** Port the restarter waits to free before relaunching. */
-  port: number;
 }
 interface AdapterInitRequest {
   source: string;
@@ -454,7 +445,6 @@ declare class PackageManager {
   pluginWorkspaceDir(profile: string, id: string): string;
   /** Read-only view for the Web UI and CLI. */
   state(): ManagerState;
-  clearRestartMarker(): void;
   clearWebRefreshMarker(): void;
   install(request: InstallRequest): Promise<InstallResult>;
   private installInner;
@@ -510,8 +500,6 @@ declare class PackageManager {
   private workDir;
   /** Anchor local directory sources so `dsh plugin add` never resolves them against the profile dir. */
   private profileSpecFor;
-  private restartMarker;
-  private touchRestart;
   private webRefreshMarker;
   private touchWebRefresh;
   /**
@@ -550,13 +538,8 @@ declare class PackageManagerService extends Service {
   state(): ManagerState;
   /** Live non-system plugins discovered from Cordis fibers. */
   localPlugins(): LocalPluginInfo[];
-  /**
-   * Schedule a backend restart: spawn a detached restarter that waits for
-   * this process to release its port, then relaunches with the recorded (or
-   * provided) command. The caller exits this process gracefully after the
-   * response is sent — no manual process killing required.
-   */
-  restart(command?: string): RestartResult;
+  /** Re-walk Cordis fibers and refresh the cached local-plugin view. */
+  refreshLocalPlugins(): LocalPluginInfo[];
   doctor(): Promise<{
     profiles: unknown[];
     droppedLedger: string[];
@@ -574,7 +557,6 @@ declare class PackageManagerService extends Service {
   forgetDisabled(request: ToggleRequest): DisabledEntry | undefined;
   getConfig(): PackageManagerConfig;
   setConfig(config: PackageManagerConfig): PackageManagerConfig;
-  clearRestartMarker(): void;
   clearWebRefreshMarker(): void;
   workspaceRoot(): string;
   workspaceDefault(): string;
@@ -591,4 +573,4 @@ declare class PackageManagerService extends Service {
 /** Mount the service. */
 declare function apply(ctx: Context, config: Config): void;
 //#endregion
-export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, type AiInstallRequest, type AiInstallResult, Config, type DisabledEntry, HarnessHost, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, LocalHost, type LocalPluginInfo, type ManagerState, type OperationLog, PackageManager, type PackageManagerConfig, type PackageManagerHost, type PackageManagerOptions, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestartResult, type RestoreRequest, type RestoreResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type ToggleRequest, type UninstallRequest, type UninstallResult, type UpdateCheckRequest, type UpdateCheckResult, type WorkspaceHistoryRequest, type WorkspaceSwitchRequest, apply, createHost, createPackageManager, idFromSource, name };
+export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, type AiInstallRequest, type AiInstallResult, Config, type DisabledEntry, HarnessHost, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, LocalHost, type LocalPluginInfo, type ManagerState, type OperationLog, PackageManager, type PackageManagerConfig, type PackageManagerHost, type PackageManagerOptions, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestoreRequest, type RestoreResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type ToggleRequest, type UninstallRequest, type UninstallResult, type UpdateCheckRequest, type UpdateCheckResult, type WorkspaceHistoryRequest, type WorkspaceSwitchRequest, apply, createHost, createPackageManager, idFromSource, name };

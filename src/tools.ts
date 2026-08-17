@@ -67,7 +67,7 @@ export function apply(ctx: Context): void {
       render: (_args, value) => [{
         type: 'text',
         text: value.ok
-          ? `Installed ${value.id} (${value.adapter}, ${value.hotMounted ? 'hot-mounted, no restart needed' : 'restart required'}): ${value.logs.join('\n')}`
+          ? `Installed ${value.id} (${value.adapter}, ${value.hotMounted ? 'hot-mounted' : 'no hot-reload path'}): ${value.logs.join('\n')}`
           : `Install failed: ${value.logs.join('\n')}`,
       }],
     },
@@ -224,50 +224,6 @@ uninstalled: ${value.uninstalled.join(', ') || '—'}`
       }
     },
   }))
-  ctx.tools.register(defineTool({
-    name: 'pm_restart_backend',
-    description:
-      'Restart the DSH backend process when plugin changes need a fresh process. '
-      + 'A detached restarter waits for this process to release its port, then relaunches '
-      + 'with the recorded launch command; this tool answers first, then the backend exits '
-      + 'gracefully. Poll GET /pm-api/health or check the restart log.',
-    parameters: {
-      command: {
-        type: 'string',
-        description: 'Optional shell command override; defaults to the recorded launch command.',
-      },
-    },
-    output: {
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          restarting: { type: 'boolean', required: true },
-          command: { type: 'string', required: true },
-          log: { type: 'string', required: true },
-          pid: { type: 'number', required: true },
-          port: { type: 'number', required: true },
-        },
-      },
-      render: (_args, value) => [{
-        type: 'text',
-        text: value.restarting
-          ? 'Restart scheduled: port ' + value.port + ' relaunched with: ' + value.command + ' Log: ' + value.log
-          : 'Restart failed',
-      }],
-    },
-    isConcurrencySafe: () => false,
-    async execute(args) {
-      const result = service.restart(typeof args.command === 'string' ? args.command : undefined)
-      setTimeout(() => {
-        const cmdline = ctx.get('cmdline') as { exit?: (code: number) => void } | undefined
-        if (cmdline?.exit !== undefined) cmdline.exit(0)
-        else process.exit(0)
-      }, 600)
-      return result
-    },
-  }))
-
 }
 
 function resolveSourceFor(cwd: string, source: string): string {
