@@ -52,15 +52,15 @@ x-dsh-pm: 1
   - `adapter`: `auto`（默认）/ `dsh-bundle` / `custom`
   - `adapterDir`: custom adapter 目录
   - `ref`: 可选 git ref
-  - `allowBuild`: 是否允许 `.venv` 内 pnpm build script
-- 安装在本进程内执行，`dsh-bundle` 插件因此能立即 Cordis 热挂载。
+  - `allowBuild`: 是否允许该 git/npm 安装执行 pnpm build script（profile allowBuilds）
+- 安装在本进程内执行，`dsh-bundle` 插件把 patch 行写入 profile `cordis.patch.yml`，宿主的 `watchUserPatches` 立即热挂载。
 
 ### `pm_switch_workspace`
 
 - 切换 `workspaceRoot` 并按目标目录的 `requirements/deps.yaml`（或根目录
   `deps.yaml`）对齐插件集合；
 - 目标声明但未安装 → 安装；已安装但 spec 变化 → 更新；目标未声明 →
-  卸载（包括目标文件完全没有的 profile）；
+  有稳定 patch 行的 dsh-bundle 热禁用，其余卸载（包括目标文件完全没有的 profile）；
 - 目标目录没有 requirements 文件时只切换根目录，不动已安装集合；
 - 参数：
   - `path`: 目标工作区根目录，空字符串 = 默认根目录

@@ -14,6 +14,8 @@ modes:                # 必填：profile 名 -> 插件列表（可为空）
 
 - `repo` 保留给仓库级操作（如 sync），当前解析不强制校验。
 - `modes` 的 key 是 profile 名，值必须是列表。
+- 旧文件中的 `channel` 字段会被忽略：现在只有 profile 依赖 +
+  `cordis.patch.yml` 托管块这一条管线。
 
 ## entry 字段
 
@@ -28,9 +30,9 @@ modes:                # 必填：profile 名 -> 插件列表（可为空）
 
 `adapter` 规则：
 
-- `dsh-bundle`：源码包 `package.json` 里声明 `dsh.bundle.patch`，profile
-  直接安装该 source 依赖并 reconcile bundle；热挂载按 patch 的稳定 id
-  挂进 loader。
+- `dsh-bundle`：源码包 `package.json` 里声明 `dsh.bundle.patch`。安装为
+  profile 依赖后，其 patch 行写入 profile `cordis.patch.yml` 托管块；宿主
+  `watchUserPatches` 按行 id 做 Loader 增量 diff（热挂载/卸载/禁用）。
 - `custom`：使用 `adapterDir` 指向的 `adapter.yaml`。
 - `auto`：探测源码；有 bundle 声明按 dsh-bundle，否则要求提供 custom
   adapter（通常先用 `adapter-init` 生成）。

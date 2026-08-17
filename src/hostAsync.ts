@@ -11,6 +11,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import { spawnSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { unlinkSync, writeFileSync } from 'node:fs'
 import { runProcess } from './process.ts'
 import type { SpawnResult } from './types.ts'
 
@@ -21,6 +24,10 @@ export interface PackageManagerHost {
   /** The harness's own profile plugin manager (`dsh plugin`). */
   dsh(args: string[], cwd: string, env: Record<string, string>): Promise<SpawnResult>
   shell(command: string, cwd: string, env: Record<string, string>): Promise<SpawnResult>
+}
+
+function shellDiagnostic(host: string, mode: string): string {
+  return `[pm-shell: host=${host} mode=${mode} platform=${process.platform} ComSpec=${process.env.ComSpec ?? '-'} TMP=${tmpdir()}] `
 }
 
 const COLLECT_BYTES = 4 * 1024 * 1024
@@ -55,10 +62,11 @@ export class LocalHost implements PackageManagerHost {
   }
 
   async shell(command: string, cwd: string, env: Record<string, string>): Promise<SpawnResult> {
-    return runProcess(command, [], cwd, env, {
+    const result = await runProcess(command, [], cwd, env, {
       timeoutMs: DEFAULT_SHELL_TIMEOUT_MS,
       shell: process.platform === 'win32' || command.includes(' '),
     })
+    return result.exitCode === 0 ? result : { ...result, stderr: shellDiagnostic(this.name, 'runProcess shell:' + String(process.platform === 'win32' || command.includes(' '))) + result.stderr }
   }
 }
 
@@ -97,9 +105,28 @@ export class HarnessHost implements PackageManagerHost {
   }
 
   async shell(command: string, cwd: string, env: Record<string, string>): Promise<SpawnResult> {
-    const shell = process.platform === 'win32' ? process.env.ComSpec ?? 'cmd.exe' : '/bin/sh'
-    const argv = process.platform === 'win32' ? [shell, '/d', '/s', '/c', command] : [shell, '-c', command]
-    return this.run(argv, cwd, env, 'shell')
+    if (process.platform === 'win32') {
+      // cmd /s /c quote rules mangle a command with embedded quotes once it
+      // travels as one argv element (the harness subprocess quotes each
+      // argument, and cmd strips the surrounding quotes it then sees). A
+      // temp .cmd file bypasses the quoting entirely.
+      const bat = join(tmpdir(), `dsh-pm-${process.pid}-${Math.random().toString(36).slice(2)}.cmd`)
+      writeFileSync(bat, `@echo off\r\n${command}\r\n`)
+      try {
+        // The bat path must NOT be quoted: a quoted argv element survives
+        // spawn quoting as `"..."`, and cmd then treats the whole quoted
+        // string as the program name. A bare space-free path executes cleanly.
+        return await this.run([process.env.ComSpec ?? 'cmd.exe', '/d', '/s', '/c', bat], cwd, env, 'shell')
+      } finally {
+        try {
+          unlinkSync(bat)
+        } catch {
+          // Best-effort cleanup; the temp file is harmless if removal fails.
+        }
+      }
+    }
+    const result = await this.run(['/bin/sh', '-c', command], cwd, env, 'shell')
+    return result.exitCode === 0 ? result : { ...result, stderr: shellDiagnostic(this.name, 'sh -c') + result.stderr }
   }
 
   private timeoutMs(capability: 'pnpm' | 'git' | 'dsh' | 'shell'): number {
@@ -239,7 +266,13 @@ function isTimeoutError(error: unknown): boolean {
   return error instanceof TimeoutError
 }
 
+/**
+ * Recover the shell command from a harness-shell argv so the local fallback
+ * can run it. The win32 shape is `[ComSpec, '/d', '/s', '/c', batPath]` — the
+ * bat path sits at argv[4]; argv[3] is the literal `/c` flag and must NOT be
+ * joined into the command (cmd would then treat `/c` as the program name).
+ */
 function commandOf(argv: string[]): string {
-  if (process.platform === 'win32') return argv.slice(3).join(' ')
+  if (process.platform === 'win32') return argv[4] ?? ''
   return argv[2] ?? ''
 }

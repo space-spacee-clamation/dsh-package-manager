@@ -3,8 +3,9 @@
  * `pm_scaffold` for the model. The tools are global (every web agent can see
  * them), but they only act on workspaces created by the settings tab: the
  * session cwd must contain a `package-manager.json` manifest written by
- * `/pm-api/ai-install`. This keeps the AI installation in-process, so the
- * Cordis hot-plug seam in `src/runtime.ts` actually runs.
+ * `/pm-api/ai-install`. The installation runs in-process and writes the
+ * hot-reload block into profile `cordis.patch.yml`, which the host's
+ * `watchUserPatches` applies without a restart.
  * @module @dsh-ext/dsh-package-manager/tools
  */
 
@@ -45,7 +46,7 @@ export function apply(ctx: Context): void {
       },
       allowBuild: {
         type: 'boolean',
-        description: 'Whether the isolated .venv may run pnpm build scripts. Defaults to false.',
+        description: 'Whether a git/npm install may run pnpm build scripts (profile allowBuilds). Defaults to false.',
       },
     },
     output: {
@@ -94,7 +95,7 @@ export function apply(ctx: Context): void {
     presentCall: () => ({
       card: 'terminal',
       title: 'Package manager',
-      description: 'Installing plugin into the workspace .venv',
+      description: 'Installing plugin as a profile dependency and hot-loading its bundle patch rows',
     }),
   }))
 
@@ -223,6 +224,50 @@ uninstalled: ${value.uninstalled.join(', ') || '—'}`
       }
     },
   }))
+  ctx.tools.register(defineTool({
+    name: 'pm_restart_backend',
+    description:
+      'Restart the DSH backend process when plugin changes need a fresh process. '
+      + 'A detached restarter waits for this process to release its port, then relaunches '
+      + 'with the recorded launch command; this tool answers first, then the backend exits '
+      + 'gracefully. Poll GET /pm-api/health or check the restart log.',
+    parameters: {
+      command: {
+        type: 'string',
+        description: 'Optional shell command override; defaults to the recorded launch command.',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          restarting: { type: 'boolean', required: true },
+          command: { type: 'string', required: true },
+          log: { type: 'string', required: true },
+          pid: { type: 'number', required: true },
+          port: { type: 'number', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.restarting
+          ? 'Restart scheduled: port ' + value.port + ' relaunched with: ' + value.command + ' Log: ' + value.log
+          : 'Restart failed',
+      }],
+    },
+    isConcurrencySafe: () => false,
+    async execute(args) {
+      const result = service.restart(typeof args.command === 'string' ? args.command : undefined)
+      setTimeout(() => {
+        const cmdline = ctx.get('cmdline') as { exit?: (code: number) => void } | undefined
+        if (cmdline?.exit !== undefined) cmdline.exit(0)
+        else process.exit(0)
+      }, 600)
+      return result
+    },
+  }))
+
 }
 
 function resolveSourceFor(cwd: string, source: string): string {

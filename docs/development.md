@@ -32,8 +32,10 @@ package-manager-web    挂载 /pm-api/*（依赖 webServer）
 ## 测试覆盖
 
 - requirements 解析与 diff plan；
-- profile 与 pluginEnv step 的事务/回滚；
-- Cordis 热挂载/卸载 runtime；
+- profile 与 custom adapter step 的事务/回滚；
+- **官方热重载验收**：测试直接复刻 `watchUserPatches` 的 root Include
+  `config.patches` 更新，验证托管块增删/disabled 行的热挂载、热禁用、热启用、
+  热卸载；
 - AI dispatch（workspace + session 创建与 attach）；
 - AI 工具注册与执行；
 - `adapter-init → restore → uninstall` 端到端流程。
@@ -55,10 +57,16 @@ node /path/to/dsh-package-manager/bin/dpm.mjs state
 
 
 
-## 完整分层热挂载（profileComposer）
+## 热重载实现（只写 cordis.patch.yml）
 
-`src/cordisRuntime.ts` 优先探测宿主已有的 `profileComposer` 服务；没有时由
-插件自身注入 `InjectedProfileComposer`：读取当前 profile 的 bundle 层 +
-用户 patch，并用 boot include 的 patch 列表长度差保留 launcher overlay，
-然后让 root Include 按稳定 id 增量 diff。没有 include（CLI/测试）时回退
-到包管理器直接挂 patch 条目。
+- `src/profilePatch.ts` 负责 profile `cordis.patch.yml` 托管块的写入、删除、
+  禁用行生成与 `!!js` 表达式 round-trip；用户原有注释与补丁行保持不变。
+- `src/manager.ts` 的 dsh-bundle 路径：
+  `pnpm add 依赖 -> 从 bundle patch 生成托管块 -> 写 profile cordis.patch.yml`。
+  之后无需任何 Loader 调用：宿主 `watchUserPatches` 会解析文件并更新 root
+  Include 的 `config.patches`。
+- 卸载先删托管块（热卸载），再回放 profile 依赖/allowBuild 逆操作。
+- `disable/enable` 只重写同一托管块，在末尾增删 `{ id, disabled: true }`
+  补丁行，安装依赖保持不变。
+- 本包不把 dsh-bundle 写入 `dsh.profile.bundles`：托管块是补丁行的唯一
+  所有者，重启后也由用户层挂载，不会双重组合同一批行。

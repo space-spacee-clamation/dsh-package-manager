@@ -2,11 +2,12 @@
  * Built-in adapter for standard DSH bundle plugins (packages declaring
  * `dsh.bundle.patch`).
  *
- * The fast path follows the harness's own `dsh plugin` policy: install the
- * source as one ordinary profile dependency (one pnpm run), then reconcile
- * `dsh.profile.bundles`. Hot-plugging mounts the *bundle patch rows* through
- * `ctx.loader` afterwards (`src/cordisRuntime.ts`); no `.venv` copy or second
- * dependency install is needed for dsh-bundle plugins.
+ * The fast path installs the source as one ordinary profile dependency (one
+ * pnpm run). It does NOT add the package to `dsh.profile.bundles`; instead the
+ * manager writes the bundle patch rows into the profile's `cordis.patch.yml`
+ * managed block, which the host's own `watchUserPatches` hot-applies. Removing
+ * any pre-existing bundle row makes the managed user-layer block the single
+ * owner, so a restart can never double-compose the same rows.
  * @module @dsh-ext/dsh-package-manager/adapters/builtinBundle
  */
 
@@ -142,10 +143,8 @@ export interface BuiltinInstallOptions {
   ref: string
   allowBuild: boolean
   packageName: string
-  /** Kept for request-shape compatibility; the fast path no longer uses it. */
-  pluginEnvDir?: string
-  /** Absolute materialized source root (`<workDir>/source`) for git/file specs. */
-  workDir: string
+  /** Remove a pre-existing `dsh.profile.bundles` row so the managed patch block is the sole owner. */
+  removeBundleRow: boolean
   executor: {
     run(specs: readonly StepSpec[], ctx: AdapterContext, backupRoot: string): Promise<StepRecord[]>
   }
@@ -153,9 +152,9 @@ export interface BuiltinInstallOptions {
 
 /**
  * Install plan for a dsh-bundle plugin: allow-build (when requested), one
- * profile dependency add through `dsh plugin`/pnpm, then bundle reconcile.
- * Inverses are recorded by the step executor as usual, so uninstall remains a
- * single `dsh plugin remove` plus allowBuild restore.
+ * profile dependency add through `dsh plugin`/pnpm, then removal of any
+ * pre-existing `dsh.profile.bundles` row so the managed `cordis.patch.yml`
+ * block is the sole owner of the patch rows.
  */
 export function builtinInstallSteps(options: BuiltinInstallOptions): StepSpec[] {
   const specs: StepSpec[] = []
@@ -169,9 +168,8 @@ export function builtinInstallSteps(options: BuiltinInstallOptions): StepSpec[] 
     spec: options.profileSpec,
     ...(options.packageName === '' ? {} : { packageName: options.packageName }),
   })
-  specs.push({
-    uses: 'profile.bundles.reconcile',
-    ...(options.packageName === '' ? {} : { packageName: options.packageName }),
-  })
+  if (options.removeBundleRow && options.packageName !== '') {
+    specs.push({ uses: 'profile.bundles.removeMany', packages: [options.packageName] })
+  }
   return specs
 }

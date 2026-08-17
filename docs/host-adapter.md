@@ -44,12 +44,13 @@ core 只依赖这三个方法，不关心实现来自哪里。
 
 ```ts
 new PackageManager({
-  host: createHost(ctx),       // ctx.subprocess 存在则 HarnessHost，否则 LocalHost
-  runtime: new CordisRuntime(ctx),
+  host: createHost(ctx), // ctx.subprocess 存在则 HarnessHost，否则 LocalHost
 })
 ```
 
-CLI 没有 Cordis Context，因此 `createHost()` 直接返回 `LocalHost`。
+CLI 没有 Cordis Context，因此 `createHost()` 直接返回 `LocalHost`。热装卸
+不经过任何 runtime 对象：dsh-bundle 的托管块写入 profile
+`cordis.patch.yml`，由宿主 `watchUserPatches` 完成 Loader diff。
 
 ## 与 coeffect 的对应
 

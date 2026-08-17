@@ -14,6 +14,7 @@
  */
 
 import { createPackageManager } from '../lib/index.js'
+import { request as httpRequest } from 'node:http'
 
 const [command, ...args] = process.argv.slice(2)
 
@@ -170,6 +171,38 @@ async function main() {
       print(result)
       return
     }
+    case 'restart': {
+      // Ask the running backend (if any) to restart itself: the backend
+      // spawns a detached restarter, answers, then exits gracefully — the
+      // restarter relaunches it once the port frees. No manual killing.
+      const port = Number.parseInt(process.env.DSH_PM_PORT ?? '3080', 10)
+      const payload = JSON.stringify({})
+      const req = httpRequest({
+        host: '127.0.0.1',
+        port,
+        path: '/pm-api/restart',
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload),
+          'x-dsh-pm': '1',
+        },
+      }, (res) => {
+        let body = ''
+        res.setEncoding('utf8')
+        res.on('data', (chunk) => { body += chunk })
+        res.on('end', () => {
+          console.log(`dpm: backend answered ${res.statusCode}`)
+          console.log(body)
+        })
+      })
+      req.on('error', (error) => {
+        throw new Error(`backend not reachable on 127.0.0.1:${port} — start the backend first, then run "dpm restart" from inside it (or use the pm_restart_backend tool)` + `: ${error.message}`)
+      })
+      req.end(payload)
+      return
+    }
+
     default:
       throw new Error(`unknown command ${JSON.stringify(command)} — run "dpm --help"`)
   }

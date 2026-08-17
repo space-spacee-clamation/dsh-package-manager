@@ -1,18 +1,19 @@
 /**
  * Package manager settings tab.
  *
- * Page 1 is the plugin workspace: a path/history toolbar on top, scrollable
+ * Page 1 is the package list: a requirements-root toolbar on top, scrollable
  * plugin cards in the middle, and a persistent AI-install input pinned at the
- * bottom. Page 2 keeps the original form-based settings for workspace
+ * bottom. Page 2 keeps the original form-based settings for requirements
  * configuration and developer-mode operations.
  */
 
-import { useEffect, useState, type CSSProperties, type FormEvent, type ReactElement } from 'react'
+import { useEffect, useState, type FormEvent, type ReactElement } from 'react'
 import type {
   AdapterInitResult, AiInstallResult, DisabledEntry, InstallResult, ManagerState, OperationLog, PackageManagerConfig,
   RestoreResult, UninstallResult,
 } from '../types.ts'
 import type { LocaleKey } from './locales.ts'
+import { styles } from './styles.ts'
 
 export interface PackageManagerTabProps {
   t: (key: LocaleKey) => string
@@ -66,126 +67,6 @@ function sourceSummary(source: string, ref: string): string {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, milliseconds))
-}
-
-const styles: Record<string, CSSProperties> = {
-  workspaceRoot: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100%',
-    minHeight: 420,
-    maxWidth: 1080,
-    width: '100%',
-    margin: '0 auto',
-    gap: 12,
-  },
-  settingsRoot: { display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 860, width: '100%', margin: '0 auto', paddingBottom: 32 },
-  intro: { opacity: 0.72, lineHeight: 1.7, margin: 0, fontSize: 13 },
-  topbar: {
-    flex: 'none',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 12,
-    flexWrap: 'wrap',
-    padding: '10px 12px',
-    border: '1px solid var(--dsw-border, rgba(127,127,127,0.22))',
-    borderRadius: 14,
-    background: 'var(--dsw-surface, rgba(255,255,255,0.018))',
-  },
-  tabs: { display: 'flex', gap: 4, padding: 2, border: '1px solid var(--dsw-border, rgba(127,127,127,0.22))', borderRadius: 10 },
-  tab: { padding: '6px 12px', border: 'none', borderRadius: 8, background: 'transparent', color: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap' },
-  tabActive: { background: 'rgba(88,136,255,0.14)', color: '#a8c0ff' },
-  pathArea: { display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 520px', minWidth: 300, flexWrap: 'wrap' },
-  topLabel: { fontSize: 12, opacity: 0.66, whiteSpace: 'nowrap' },
-  select: {
-    flex: '1 1 260px',
-    minWidth: 200,
-    padding: '8px 10px',
-    border: '1px solid var(--dsw-border, rgba(127,127,127,0.28))',
-    borderRadius: 8,
-    background: 'transparent',
-    color: 'inherit',
-    textOverflow: 'ellipsis',
-  },
-  input: { padding: '8px 10px', border: '1px solid var(--dsw-border, rgba(127,127,127,0.28))', borderRadius: 8, background: 'transparent', color: 'inherit', minWidth: 0 },
-  button: { padding: '7px 14px', border: '1px solid var(--dsw-border, rgba(127,127,127,0.30))', borderRadius: 8, background: 'transparent', color: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap' },
-  primary: {
-    borderColor: 'rgba(88,136,255,0.65)',
-    color: '#a8c0ff',
-    background: 'rgba(88,136,255,0.12)',
-  },
-  ghost: { opacity: 0.78 },
-  danger: { borderColor: 'rgba(220,80,80,0.55)', color: '#e05a5a', background: 'rgba(220,80,80,0.06)' },
-  dangerArmed: { borderColor: '#e05a5a', color: '#fff', background: 'rgba(220,80,80,0.32)' },
-  scroller: {
-    flex: 1,
-    minHeight: 360,
-    overflowY: 'auto',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 14,
-    padding: '2px 2px 18px',
-    scrollbarGutter: 'stable',
-  },
-  footer: {
-    flex: 'none',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 12,
-    flexWrap: 'wrap',
-    padding: '12px 14px',
-    border: '1px solid rgba(88,136,255,0.42)',
-    borderRadius: 14,
-    background: 'linear-gradient(135deg, rgba(88,136,255,0.10), rgba(88,136,255,0.02))',
-  },
-  footerInputWrap: { flex: '1 1 320px', display: 'flex', flexDirection: 'column', gap: 5, minWidth: 220 },
-  card: {
-    border: '1px solid var(--dsw-border, rgba(127,127,127,0.22))',
-    borderRadius: 14,
-    padding: 16,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 12,
-    background: 'var(--dsw-surface, rgba(255,255,255,0.018))',
-  },
-  title: { margin: 0, fontSize: 15, fontWeight: 650 },
-  titleRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
-  row: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' },
-  field: { display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 240px', minWidth: 200 },
-  label: { fontSize: 12, opacity: 0.72 },
-  banner: { border: '1px solid rgba(255,190,80,0.55)', borderRadius: 12, padding: 12, display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', background: 'rgba(255,190,80,0.06)' },
-  log: { fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 12, whiteSpace: 'pre-wrap', margin: 0 },
-  mono: {
-    fontFamily: 'ui-monospace, Consolas, monospace',
-    fontSize: 12,
-    padding: '3px 8px',
-    border: '1px solid var(--dsw-border, rgba(127,127,127,0.22))',
-    borderRadius: 999,
-    opacity: 0.86,
-    overflowWrap: 'anywhere',
-  },
-  list: { display: 'flex', flexDirection: 'column', gap: 10 },
-  pluginCard: {
-    border: '1px solid var(--dsw-border, rgba(127,127,127,0.22))',
-    borderRadius: 14,
-    padding: 14,
-    display: 'flex',
-    alignItems: 'center',
-    gap: 16,
-    flexWrap: 'wrap',
-    background: 'var(--dsw-surface, rgba(255,255,255,0.018))',
-  },
-  pluginName: { flex: '1 1 180px', minWidth: 150, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' },
-  pluginDesc: { flex: '1 1 320px', minWidth: 220, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' },
-  pluginSource: { margin: 0, fontSize: 13, lineHeight: 1.55, overflowWrap: 'anywhere' },
-  pluginActions: { flex: '0 0 auto', display: 'flex', gap: 10, alignItems: 'center' },
-  meta: { fontSize: 12, opacity: 0.78, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' },
-  badge: { fontSize: 11, padding: '2px 8px', borderRadius: 999, border: '1px solid var(--dsw-border, rgba(127,127,127,0.30))', opacity: 0.82 },
-  hotBadge: { fontSize: 11, padding: '2px 8px', borderRadius: 999, border: '1px solid rgba(88,136,255,0.50)', color: '#a8c0ff', background: 'rgba(88,136,255,0.08)' },
-  aiBadge: { fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid rgba(88,136,255,0.55)', color: '#a8c0ff', background: 'rgba(88,136,255,0.10)', whiteSpace: 'nowrap' },
-  error: { color: '#e05a5a', fontSize: 12, whiteSpace: 'pre-wrap' },
-  switch: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' },
-  sectionTitle: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
 }
 
 export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
@@ -406,12 +287,14 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
   const resultPanel = (result !== null || logs.length > 0) ? (
     <div style={styles.card}>
       <h3 style={styles.title}>{t('result')}</h3>
-      {logs.map((line, index) => (
-        <pre key={index} style={{ ...styles.log, color: line.level === 'error' ? '#e05a5a' : undefined }}>
-          [{line.level}] {line.message}
-        </pre>
-      ))}
-      {result !== null && <pre style={styles.log}>{resultSummary(result)}</pre>}
+      <div style={styles.logPanel}>
+        {logs.map((line, index) => (
+          <pre key={index} style={{ ...styles.log, color: line.level === 'error' ? '#e05a5a' : undefined }}>
+            [{line.level}] {line.message}
+          </pre>
+        ))}
+        {result !== null && <pre style={styles.log}>{resultSummary(result)}</pre>}
+      </div>
     </div>
   ) : null
 
@@ -451,7 +334,14 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
 
   return (
     <div style={page === 'workspace' ? styles.workspaceRoot : styles.settingsRoot}>
-      <div style={styles.topbar}>
+      <header style={styles.header}>
+        <div style={styles.brand}>
+          <span style={styles.logo}>PM</span>
+          <div>
+            <h1 style={styles.pageTitle}>{page === 'workspace' ? t('pageWorkspace') : t('pageSettings')}</h1>
+            <p style={styles.pageSubtitle}>{page === 'workspace' ? t('workspaceSwitchHint') : t('pageSettingsHint')}</p>
+          </div>
+        </div>
         <div style={styles.tabs}>
           <button type="button" style={{ ...styles.tab, ...(page === 'workspace' ? styles.tabActive : {}) }} onClick={() => setPage('workspace')}>
             {t('pageWorkspace')}
@@ -460,10 +350,12 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
             {t('pageSettings')}
           </button>
         </div>
+      </header>
 
-        {page === 'workspace' ? (
+      {page === 'workspace' ? (
+        <div style={styles.pathCard}>
           <div style={styles.pathArea}>
-            <span style={styles.topLabel}>{t('workspaceRoot')}</span>
+            <span style={styles.topLabel}>{t('requirementsRoot')}</span>
             <select
               style={styles.select}
               value={currentRoot}
@@ -507,10 +399,8 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
               {t('realignWorkspace')}
             </button>
           </div>
-        ) : (
-          <p style={styles.intro}>{t('pageSettingsHint')}</p>
-        )}
-      </div>
+        </div>
+      ) : null}
 
       {page === 'workspace' ? (
         <>
@@ -519,7 +409,6 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
             {webRefreshBanner}
             {error !== '' && <pre style={styles.error}>{error}</pre>}
             {resultPanel}
-            <p style={styles.intro}>{t('workspaceSwitchHint')}</p>
 
             <div style={styles.card}>
               <div style={styles.titleRow}>
@@ -534,9 +423,9 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
                 {enabledEntries.map(entry => {
                   const key = deleteKey({ kind: 'installed', profile: entry.profile, id: entry.id })
                   return (
-                    <div key={`${entry.profile}/${entry.id}`} style={styles.pluginCard}>
+                    <div key={`${entry.profile}/${entry.id}`} style={{ ...styles.pluginCard, ...(entry.adapter === 'dsh-bundle' ? styles.hotCard : {}) }}>
                       <div style={styles.pluginName}>
-                        <strong>{entry.id}</strong>
+                        <strong><span style={styles.statusDot} /> {entry.id}</strong>
                         <span style={entry.adapter === 'dsh-bundle' ? styles.hotBadge : styles.badge}>
                           {entry.adapter === 'dsh-bundle' ? t('hotBadge') : t('customBadge')}
                         </span>
@@ -546,7 +435,14 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
                         <div style={styles.meta}>
                           <span style={styles.badge}>{entry.profile}</span>
                           {entry.ref !== '' && <span style={styles.mono}>{entry.ref}</span>}
-                          {entry.pluginEnvDir !== undefined && <span style={styles.mono} title={entry.pluginEnvDir}>{t('env')}</span>}
+                          {entry.adapter === 'dsh-bundle' ? (
+                            <>
+                              {entry.packageName !== '' && <span style={styles.mono} title={entry.packageName}>{t('packageName')}: {entry.packageName}</span>}
+                              <span style={styles.hotBadge}>{t('patchBlock')}</span>
+                            </>
+                          ) : (
+                            entry.pluginEnvDir !== undefined && <span style={styles.mono} title={entry.pluginEnvDir}>{t('env')}</span>
+                          )}
                         </div>
                       </div>
                       <div style={styles.pluginActions}>
@@ -587,9 +483,9 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
                 {disabledEntries.map(item => {
                   const key = deleteKey({ kind: 'disabled', profile: item.profile, id: item.id })
                   return (
-                    <div key={`${item.profile}/${item.id}`} style={styles.pluginCard}>
+                    <div key={`${item.profile}/${item.id}`} style={{ ...styles.pluginCard, ...styles.disabledCard }}>
                       <div style={styles.pluginName}>
-                        <strong>{item.id}</strong>
+                        <strong><span style={{ ...styles.statusDot, background: '#b9b9b9', boxShadow: '0 0 0 3px rgba(185,185,185,0.10)' }} /> {item.id}</strong>
                         <span style={item.adapter === 'dsh-bundle' ? styles.hotBadge : styles.badge}>
                           {item.adapter === 'dsh-bundle' ? t('hotBadge') : t('customBadge')}
                         </span>

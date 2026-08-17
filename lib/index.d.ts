@@ -32,9 +32,9 @@ interface LedgerEntry {
   materializedDir: string;
   /** Absolute scratch directory that owns this install's backups (clone, rollback storage). */
   workDir?: string;
-  /** Absolute per-plugin workspace (the AI session cwd; contains .venv). */
+  /** Absolute per-plugin workspace (the AI session cwd; custom adapters may use `.venv` inside it). */
   workspaceDir?: string;
-  /** Absolute isolated dependency layer inside workspaceDir (the plugin ".venv"). */
+  /** Optional custom-adapter dependency layer inside workspaceDir (the plugin ".venv"). */
   pluginEnvDir?: string;
   /** Resolved git commit, empty for file/npm sources. */
   resolvedCommit: string;
@@ -42,15 +42,7 @@ interface LedgerEntry {
   steps: StepRecord[];
   /** Whether the original install request allowed pnpm build scripts. */
   allowBuild?: boolean;
-  /**
-   * Install channel. 'profile' (default) installs the source as a profile
-   * dependency plus a `dsh.profile.bundles` row, composed by the host at
-   * boot; 'workspace' installs the source into the plugin's isolated `.venv`
-   * and mounts its bundle patch rows through a per-workspace Cordis Include
-   * subtree, without touching the profile manifest.
-   */
-  channel?: 'profile' | 'workspace';
-  /** Workspace-channel rows are turned off: mounted with disabled patches. */
+  /** Rows are turned off: the managed profile patch block carries trailing `{ id, disabled: true }` rows. */
   disabled?: boolean;
   /** Change-detection fingerprint of the spec that produced this install. */
   spec: SpecFingerprint;
@@ -88,11 +80,6 @@ interface SpecEntry {
   ref: string;
   /** Allow pnpm build scripts for this source (never auto-approved). */
   allowBuild: boolean;
-  /**
-   * Install channel; defaults to 'profile'. 'workspace' installs into the
-   * plugin's isolated .venv and never edits the profile manifest.
-   */
-  channel?: 'profile' | 'workspace';
 }
 /** A requirements file: dependency spec + per-mode plugin lists. */
 interface RequirementsSpec {
@@ -106,7 +93,7 @@ interface RequirementsSpec {
 }
 /** One reconciliation action computed from spec vs ledger. */
 interface PlanAction {
-  action: 'install' | 'uninstall' | 'update' | 'keep';
+  action: 'install' | 'uninstall' | 'update' | 'keep' | 'disable' | 'enable';
   profile: string;
   id: string;
   reason: string;
@@ -120,7 +107,6 @@ interface SpecFingerprint {
   adapterDir: string;
   ref: string;
   allowBuild: boolean;
-  channel?: 'profile' | 'workspace';
 }
 /** A line of operation progress, surfaced to CLI and the Web UI. */
 interface OperationLog {
@@ -136,9 +122,9 @@ interface PackageManagerConfig {
   /** Pull + restore the configured repo automatically when the service mounts. */
   autoSync: boolean;
   /**
-   * Root for per-plugin workspaces. Each install lives in
-   * `<workspaceRoot>/<profile>/<id>` with its isolated `.venv` dependency
-   * layer. Empty means `<home>/package-manager/plugin-workspaces`.
+   * Root for per-plugin AI/custom-adapter workspaces. dsh-bundle installs
+   * do not use this directory; empty means
+   * `<home>/package-manager/plugin-workspaces`.
    */
   workspaceRoot: string;
 }
@@ -203,12 +189,6 @@ interface InstallRequest {
   id?: string;
   source: string;
   adapter: 'auto' | 'dsh-bundle' | 'custom';
-  /**
-   * Install channel; defaults to 'profile'. 'workspace' mounts the bundle
-   * patch rows through a per-workspace Cordis Include subtree and never
-   * edits the profile manifest.
-   */
-  channel?: 'profile' | 'workspace';
   /** Required when adapter is custom; resolved against the requirements file when restoring. */
   adapterDir?: string;
   /**
@@ -240,6 +220,18 @@ interface SyncRequest {
   modes?: string[];
   dryRun?: boolean;
 }
+/** Result of scheduling a backend restart. */
+interface RestartResult {
+  restarting: boolean;
+  /** The relaunch command the restarter will run. */
+  command: string;
+  /** Log file the relaunched process appends to. */
+  log: string;
+  /** Restarter process id. */
+  pid: number;
+  /** Port the restarter waits to free before relaunching. */
+  port: number;
+}
 interface AdapterInitRequest {
   source: string;
   id: string;
@@ -254,13 +246,11 @@ interface InstallResult {
   id: string;
   adapter: string;
   packageName: string;
-  /** Install channel that produced this entry. */
-  channel: 'profile' | 'workspace';
-  /** Absolute isolated dependency layer (`.venv`) created for this install. */
+  /** Optional custom-adapter dependency layer (`.venv`) for this install. */
   pluginEnvDir: string;
   /** Absolute plugin workspace owning the dependency layer. */
   workspaceDir: string;
-  /** True when the plugin was mounted live through Cordis (no restart needed). */
+  /** True when the managed cordis.patch.yml block was written; the host watcher applies it live (no restart needed). */
   hotMounted: boolean;
   steps: StepRecord[];
   logs: OperationLog[];
@@ -278,7 +268,7 @@ interface RestoreResult {
 interface UninstallResult {
   profile: string;
   id: string;
-  /** True when the live Cordis fiber was disposed before inverse replay. */
+  /** True when the managed cordis.patch.yml block was removed; the host watcher unloads the rows live. */
   hotUnmounted: boolean;
   steps: StepRecord[];
   logs: OperationLog[];
@@ -304,30 +294,13 @@ interface AdapterContext {
   profileDir: string;
   /** Per-install scratch directory (clones, downloads, backups). */
   workDir: string;
-  /** Per-plugin workspace (the AI session cwd); contains `.venv`. */
+  /** Per-plugin workspace (the AI session cwd; custom adapters may use `.venv`). */
   workspaceDir?: string;
-  /** Isolated dependency layer inside workspaceDir (the plugin ".venv"). */
+  /** Optional custom-adapter dependency layer inside workspaceDir (the plugin ".venv"). */
   pluginEnvDir?: string;
   source: string;
   ref: string;
   log: (level: OperationLog['level'], message: string) => void;
-}
-/** In-process Cordis hot-plug seam used by the Service, mocked by tests/CLI. */
-interface PackageManagerRuntime {
-  /** True when the runtime recomposes the profile include (best layering). */
-  readonly composesProfile?: boolean;
-  /** Which install channel this runtime serves; entries of the other channel are not hot-mounted by it. */
-  readonly channel?: 'profile' | 'workspace';
-  /** Mount the installed bundle's patch rows (or package root fallback). */
-  mount(entry: LedgerEntry): Promise<RuntimeMountResult>;
-  /** Dispose the live fiber (or all fibers of the module) before inverse replay. */
-  unmount(entry: LedgerEntry): Promise<RuntimeMountResult>;
-  /** Disable or re-enable the live rows without uninstalling anything. */
-  setDisabled(entry: LedgerEntry, disabled: boolean): Promise<RuntimeMountResult>;
-}
-interface RuntimeMountResult {
-  mounted: boolean;
-  reason: string;
 }
 /** Minimal request from the simplified settings tab: one link, dispatch to AI. */
 interface AiInstallRequest {
@@ -436,30 +409,25 @@ interface PackageManagerOptions {
   git?: GitRunner;
   /** Process-host adapter for pnpm/git/dsh/shell; defaults to local or harness execution. */
   host?: PackageManagerHost;
-  /** In-process Cordis hot-plug seam; absent for the CLI and tests. */
-  runtime?: PackageManagerRuntime;
 }
 declare class PackageManager {
   readonly home: string;
   private readonly executor;
   private readonly git;
-  private readonly runtime;
   private reconciling;
   /** Serializes profile/ledger mutations; the host runs pnpm without a lock, so install/uninstall/restore must never interleave. */
   private chain;
-  private enqueue;
   private switchError;
+  private enqueue;
   constructor(options?: PackageManagerOptions);
-  /** Resolved root for per-plugin workspaces (config or default). */
+  /** Resolved root for per-plugin workspaces (AI session cwd; not a dependency layer). */
   workspaceRoot(): string;
-  /** Default workspace root used when config.workspaceRoot is empty. */
   workspaceDefault(): string;
-  /** `<workspaceRoot>/<profile>/<safe-id>` for one plugin install. */
   pluginWorkspaceDir(profile: string, id: string): string;
   /** Read-only view for the Web UI and CLI. */
   state(): ManagerState;
-  /** Remove the restart hint (the Web UI calls this once the user acknowledged it). */
   clearRestartMarker(): void;
+  clearWebRefreshMarker(): void;
   install(request: InstallRequest): Promise<InstallResult>;
   private installInner;
   uninstall(request: UninstallRequest): Promise<UninstallResult>;
@@ -468,10 +436,8 @@ declare class PackageManager {
   private restoreInner;
   /**
    * Repair home state so the next boot cannot die on profile composition:
-   * prune unresolvable bundle rows (dependency gone AND package unresolvable),
-   * remove their dangling node_modules links, and drop stale ledger records.
-   * Safe to run while the host is live; also invoked automatically at the
-   * start of every workspace switch.
+   * prune unresolvable bundle rows, drop stale ledger records together with
+   * their managed hot-reload blocks, and reconcile profile pnpm trees.
    */
   doctor(): Promise<{
     profiles: ReturnType<typeof healProfiles>;
@@ -479,53 +445,35 @@ declare class PackageManager {
     reconciled: string[];
   }>;
   /**
-   * Switch the active workspace root and reconcile the installed set against
-   * that workspace's requirements file. Modes present in the ledger but not
-   * declared by the target file are reconciled to empty, so switching closes
-   * plugins the target does not contain.
+   * Switch the active requirements root and reconcile the installed set.
+   * Modes present in the ledger but absent from the target file are reconciled
+   * to an empty desired set; switchable entries are disabled in place, not
+   * uninstalled.
    */
   switchWorkspace(path: string, dryRun?: boolean): Promise<RestoreResult>;
   private switchWorkspaceInner;
-  /** Fast-path check: entries created by the single-dependency bundle adapter. */
-  private isFastBundleEntry;
-  /** One dsh/pnpm command removes every fast-path bundle dependency in a profile. */
-  private uninstallFastBundleBatch;
-  private installFastBundleBatch;
-  private reconcilePlanBatched;
+  private isDisableable;
   private reconcilePlan;
   private resolveWorkspaceInput;
   private workspaceRequirementsFile;
   sync(request: SyncRequest): Promise<RestoreResult>;
   private syncInner;
-  /** Persistent preferences: local requirements storage, remote URL, auto sync. */
   getConfig(): PackageManagerConfig;
-  /** Validate and persist manager preferences. */
   setConfig(config: PackageManagerConfig): PackageManagerConfig;
-  /** Recently used workspace roots, newest first. */
   workspaceHistory(): string[];
-  /** Record one workspace root in the local runtime history. */
   recordWorkspaceHistory(path: string): string[];
-  /** Remove one workspace root from the local runtime history. */
   forgetWorkspaceHistory(path: string): string[];
-  /** Clear the local workspace-root history. */
   clearWorkspaceHistory(): string[];
-  /** Delete a disabled-entry memory record (no ledger entry exists to uninstall). */
   forgetDisabled(request: ToggleRequest): DisabledEntry | undefined;
-  /** Clone/pull the configured requirements repo, then restore its default deps.yaml. */
   syncConfigured(): Promise<RestoreResult>;
   private syncConfiguredInner;
-  /** Switch a plugin off: hot-disable live bundle rows, otherwise remember and uninstall. */
   disable(request: ToggleRequest): Promise<UninstallResult>;
   private disableInner;
-  /** Switch a disabled plugin back on by replaying its remembered request. */
   enable(request: ToggleRequest): Promise<InstallResult>;
   private enableInner;
-  /** Analyze a source and scaffold a requirements entry + adapter for it. */
   adapterInit(request: AdapterInitRequest): Promise<AdapterInitResult>;
   private resolveAdapter;
   private writeDepsEntry;
-  /** Stable-id patch rows contributed by an installed dsh-bundle. */
-  private patchRowsFor;
   private clearDisabled;
   private adapterVars;
   private workDir;
@@ -534,55 +482,17 @@ declare class PackageManager {
   private restartMarker;
   private touchRestart;
   private webRefreshMarker;
-  /** Remove the web-refresh hint (the Web UI calls this once the user acknowledged it). */
-  clearWebRefreshMarker(): void;
   private touchWebRefresh;
   /**
-   * After a hot mount/unmount, record the client-face consequence: the host's
-   * client-modules graph updates live from the loader, but open web tabs must
-   * reload to fetch the new module table. Missing client artifacts (unbuilt
-   * source packages) are reported instead of failing the install.
+   * The host's client-modules graph updates live from the loader diff; open
+   * web tabs only need a reload. Missing client artifacts are reported instead
+   * of failing the install.
    */
   private noteClientFace;
 }
 /** Create a manager bound to one harness home (CLI / tests seam). */
 declare function createPackageManager(options?: PackageManagerOptions): PackageManager;
 declare function idFromSource(source: string): string;
-//#endregion
-//#region src/cordisRuntime.d.ts
-declare class CordisRuntime implements PackageManagerRuntime {
-  private readonly ctx;
-  private readonly loader;
-  private readonly composer;
-  private readonly loaderRows;
-  private readonly fallbackRows;
-  readonly composesProfile: boolean;
-  constructor(ctx: Context);
-  private key;
-  mount(entry: LedgerEntry): Promise<RuntimeMountResult>;
-  unmount(entry: LedgerEntry): Promise<RuntimeMountResult>;
-  setDisabled(entry: LedgerEntry, disabled: boolean): Promise<RuntimeMountResult>;
-  private recomposeComposition;
-  private mountNativePatch;
-  private mountNativePackage;
-  private unmountNative;
-  private setDisabledNative;
-  private findLoaderEntryById;
-  private findLoaderEntryByName;
-  private mountFallbackPatch;
-  private mountFallbackPackage;
-  private unmountFallback;
-  private setDisabledFallback;
-  /**
-   * Resolve the package entrypoint through the target profile's node_modules.
-   * This also works when dsh-package-manager itself is linked from outside
-   * the profile: a bare dynamic import would resolve relative to THIS module,
-   * while the installed plugin is linked into the profile.
-   */
-  private resolvePluginUrl;
-  private importPlugin;
-  private importSpecifier;
-}
 //#endregion
 //#region src/index.d.ts
 declare const name = "package-manager";
@@ -592,13 +502,6 @@ interface Config {
   home: string;
   /** HTTP prefix of the Web API; the browser half calls the same prefix. */
   apiPrefix: string;
-  /**
-   * Hot-plug runtime. 'workspace-tree' mounts bundle rows through per-workspace
-   * Include subtrees; 'legacy' keeps the profile-composer runtime; 'auto'
-   * (default) picks workspace-tree when the ledger already has workspace-channel
-   * entries, otherwise legacy.
-   */
-  runtime?: string;
 }
 declare const Config: z<Config>;
 declare module '@deepseek-ai/cordis' {
@@ -610,8 +513,16 @@ declare module '@deepseek-ai/cordis' {
 declare class PackageManagerService extends Service {
   readonly manager: PackageManager;
   readonly apiPrefix: string;
+  readonly home: string;
   constructor(ctx: Context, config: Config);
   state(): ManagerState;
+  /**
+   * Schedule a backend restart: spawn a detached restarter that waits for
+   * this process to release its port, then relaunches with the recorded (or
+   * provided) command. The caller exits this process gracefully after the
+   * response is sent — no manual process killing required.
+   */
+  restart(command?: string): RestartResult;
   doctor(): Promise<{
     profiles: unknown[];
     droppedLedger: string[];
@@ -637,16 +548,12 @@ declare class PackageManagerService extends Service {
   recordWorkspaceHistory(path: string): string[];
   forgetWorkspaceHistory(path: string): string[];
   clearWorkspaceHistory(): string[];
-  /** Switch the active workspace root and reconcile against its requirements file. */
+  /** Switch the active requirements root and reconcile against its requirements file. */
   switchWorkspace(path: string, dryRun?: boolean): Promise<RestoreResult>;
   /** Create an AI session in one plugin workspace and dispatch installation. */
   dispatchAiInstall(request: AiInstallRequest): Promise<AiInstallResult>;
 }
-/**
- * Mount the service.
- * @param ctx - registrant context.
- * @param config - validated deployment configuration.
- */
+/** Mount the service. */
 declare function apply(ctx: Context, config: Config): void;
 //#endregion
-export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, type AiInstallRequest, type AiInstallResult, Config, CordisRuntime, type DisabledEntry, HarnessHost, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, LocalHost, type ManagerState, type OperationLog, PackageManager, type PackageManagerConfig, type PackageManagerHost, type PackageManagerOptions, type PackageManagerRuntime, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestoreRequest, type RestoreResult, type RuntimeMountResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type ToggleRequest, type UninstallRequest, type UninstallResult, type WorkspaceHistoryRequest, type WorkspaceSwitchRequest, apply, createHost, createPackageManager, idFromSource, name };
+export { type AdapterContext, type AdapterInitRequest, type AdapterInitResult, type AiInstallRequest, type AiInstallResult, Config, type DisabledEntry, HarnessHost, type InstallRequest, type InstallResult, type Ledger, type LedgerEntry, LocalHost, type ManagerState, type OperationLog, PackageManager, type PackageManagerConfig, type PackageManagerHost, type PackageManagerOptions, PackageManagerService, type PlanAction, type ProbeResult, type ProfileState, type RequirementsSpec, type RestartResult, type RestoreRequest, type RestoreResult, type SourceKind, type SpawnResult, type SpecEntry, type SpecFingerprint, type StepRecord, type StepSpec, type SyncRequest, type ToggleRequest, type UninstallRequest, type UninstallResult, type WorkspaceHistoryRequest, type WorkspaceSwitchRequest, apply, createHost, createPackageManager, idFromSource, name };

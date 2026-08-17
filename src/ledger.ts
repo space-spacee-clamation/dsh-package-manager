@@ -67,10 +67,10 @@ export function listEntries(ledger: Ledger): LedgerEntry[] {
 }
 
 /**
- * Installed-truth check for one entry. The profile manifest is the host's
- * authoritative plugin state (`dsh plugin` owns dependencies + bundle rows),
- * so an entry whose recorded profile dependency and bundle row both vanished
- * (for example the user removed it with the host CLI) is no longer installed.
+ * Installed-truth check for one entry. The profile manifest dependency list
+ * is the host's authoritative plugin state, so an entry whose recorded profile
+ * dependency vanished (for example the user removed it with the host CLI) is
+ * no longer installed.
  *
  * dsh-bundle entries check their packageName. Custom-adapter entries check
  * the packageNames recorded by their `profile.dependency.add` steps; a custom
@@ -78,10 +78,6 @@ export function listEntries(ledger: Ledger): LedgerEntry[] {
  * files into the home) stays effective — its truth lives outside the profile.
  */
 export function isEntryEffective(home: string, entry: LedgerEntry): boolean {
-  // Workspace-channel entries keep their installed-truth inside the plugin
-  // workspace (.venv), never in the profile manifest, so the profile check
-  // does not apply to them.
-  if ((entry.channel ?? 'profile') === 'workspace') return true
   let manifest: ProfileManifest
   try {
     manifest = readManifest(entry.profileDir ?? profileDir(home, entry.profile))
@@ -89,7 +85,6 @@ export function isEntryEffective(home: string, entry: LedgerEntry): boolean {
     return true
   }
   const dependencies = manifest.dependencies ?? {}
-  const bundles = manifest.dsh?.profile?.bundles ?? []
   const dependencyNames = entry.adapter === 'dsh-bundle' && entry.packageName !== ''
     ? [entry.packageName]
     : entry.steps
@@ -97,7 +92,7 @@ export function isEntryEffective(home: string, entry: LedgerEntry): boolean {
       .map(step => step.params['packageName'])
       .filter((name): name is string => typeof name === 'string' && name !== '')
   if (dependencyNames.length === 0) return true
-  return dependencyNames.some(name => dependencies[name] !== undefined || bundles.includes(name))
+  return dependencyNames.some(name => dependencies[name] !== undefined)
 }
 
 /**

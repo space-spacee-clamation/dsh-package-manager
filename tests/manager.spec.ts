@@ -49,20 +49,30 @@ describe('PackageManager integration (real pnpm)', () => {
     })
     expect(installed.adapter).toBe('dsh-bundle')
     expect(installed.packageName).toBe('fixture-bundle')
+    expect(installed.hotMounted).toBe(true)
 
-    const manifest = readManifest(join(home, 'profiles', 'web'))
+    const profileDir = join(home, 'profiles', 'web')
+    const manifest = readManifest(profileDir)
     expect(manifest.dependencies?.['fixture-bundle']).toBeTruthy()
-    expect(manifest.dsh?.profile?.bundles).toContain('fixture-bundle')
+    // The managed cordis.patch.yml block is the sole owner of the bundle rows;
+    // the package must NOT also appear in dsh.profile.bundles (no double
+    // composition on the next boot).
+    expect(manifest.dsh?.profile?.bundles).not.toContain('fixture-bundle')
+    const patch = readFileSync(join(profileDir, 'cordis.patch.yml'), 'utf8')
+    expect(patch).toContain('dsh-package-manager: "fixture"')
+    expect(patch).toContain('id: fixture-row')
 
     const state = manager.state()
     expect(state.entries.map(entry => entry.id)).toContain('fixture')
-    expect(state.restartNeeded).toBe(true)
+    expect(state.restartNeeded).toBe(false)
 
     const removed = await manager.uninstall({ profile: 'web', id: 'fixture' })
+    expect(removed.hotUnmounted).toBe(true)
     expect(removed.steps.length).toBeGreaterThan(0)
-    const after = readManifest(join(home, 'profiles', 'web'))
+    const after = readManifest(profileDir)
     expect(after.dependencies?.['fixture-bundle']).toBeUndefined()
     expect(after.dsh?.profile?.bundles).not.toContain('fixture-bundle')
+    expect(readFileSync(join(profileDir, 'cordis.patch.yml'), 'utf8')).not.toContain('fixture-row')
     expect(manager.state().entries).toEqual([])
   }, 120_000)
 
@@ -92,21 +102,23 @@ modes:
   }, 180_000)
 })
 
-  it('switches a plugin off and back on through the disabled store', async () => {
+  it('switches a plugin off and back on in place (install kept, rows disabled)', async () => {
     const home = tempDir()
     const fixture = makeBundleFixture(join(home, 'fixture'))
     const manager = createPackageManager({ home })
     await manager.install({ profile: 'web', id: 'fixture', source: fixture, adapter: 'dsh-bundle' })
 
     await manager.disable({ profile: 'web', id: 'fixture' })
-    expect(manager.state().entries.map(entry => entry.id)).toEqual([])
-    expect(manager.state().disabled.map(entry => entry.id)).toEqual(['fixture'])
+    // Switch-off semantics: the entry stays installed, marked disabled.
+    expect(manager.state().entries.find(entry => entry.id === 'fixture')?.disabled).toBe(true)
+    expect(manager.state().disabled).toEqual([])
 
     await manager.enable({ profile: 'web', id: 'fixture' })
-    expect(manager.state().entries.map(entry => entry.id)).toEqual(['fixture'])
+    expect(manager.state().entries.find(entry => entry.id === 'fixture')?.disabled).toBe(false)
     expect(manager.state().disabled).toEqual([])
 
     await manager.uninstall({ profile: 'web', id: 'fixture' })
+    expect(manager.state().entries).toEqual([])
   }, 120_000)
 
   it('rejects monorepo sources with workspace: dependencies before touching the profile', async () => {
@@ -125,6 +137,15 @@ modes:
     expect(manifest.dependencies ?? {}).toEqual({})
     expect(manager.state().entries).toEqual([])
   }, 120_000)
+
+  it('refuses to manage a shipped base bundle owned by the host launcher', async () => {
+    const home = tempDir()
+    const manager = createPackageManager({ home })
+    await expect(manager.install({
+      profile: 'web', id: 'base', source: '@deepseek-ai/dsh-base', adapter: 'dsh-bundle',
+    })).rejects.toThrow('shipped base bundles')
+    expect(manager.state().entries).toEqual([])
+  })
 
   it('rejects bundles whose declared entrypoint is unbuilt', async () => {
     const home = tempDir()
@@ -161,7 +182,7 @@ modes:
 
     expect(manager.state().entries).toEqual([])
     const removed = await manager.uninstall({ profile: 'web', id: 'fixture' })
-    expect(removed.hotUnmounted).toBe(false)
+    expect(removed.hotUnmounted).toBe(true)
     expect(manager.state().entries).toEqual([])
   }, 120_000)
 

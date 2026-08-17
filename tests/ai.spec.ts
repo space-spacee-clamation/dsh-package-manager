@@ -92,7 +92,7 @@ describe('AI install dispatch', () => {
     mkdirSync(join(home, 'package-manager'), { recursive: true })
     writeFileSync(join(home, 'package-manager', 'ledger.json'), '{ this is not json')
     const ctx = new Context()
-    const service = new PackageManagerService(ctx as never, { home, apiPrefix: '/pm-api', runtime: 'auto' })
+    const service = new PackageManagerService(ctx as never, { home, apiPrefix: '/pm-api' })
     expect(service.apiPrefix).toBe('/pm-api')
   })
 })

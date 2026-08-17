@@ -30,9 +30,9 @@ export interface LedgerEntry {
   materializedDir: string
   /** Absolute scratch directory that owns this install's backups (clone, rollback storage). */
   workDir?: string
-  /** Absolute per-plugin workspace (the AI session cwd; contains .venv). */
+  /** Absolute per-plugin workspace (the AI session cwd; custom adapters may use `.venv` inside it). */
   workspaceDir?: string
-  /** Absolute isolated dependency layer inside workspaceDir (the plugin ".venv"). */
+  /** Optional custom-adapter dependency layer inside workspaceDir (the plugin ".venv"). */
   pluginEnvDir?: string
   /** Resolved git commit, empty for file/npm sources. */
   resolvedCommit: string
@@ -40,15 +40,7 @@ export interface LedgerEntry {
   steps: StepRecord[]
   /** Whether the original install request allowed pnpm build scripts. */
   allowBuild?: boolean
-  /**
-   * Install channel. 'profile' (default) installs the source as a profile
-   * dependency plus a `dsh.profile.bundles` row, composed by the host at
-   * boot; 'workspace' installs the source into the plugin's isolated `.venv`
-   * and mounts its bundle patch rows through a per-workspace Cordis Include
-   * subtree, without touching the profile manifest.
-   */
-  channel?: 'profile' | 'workspace'
-  /** Workspace-channel rows are turned off: mounted with disabled patches. */
+  /** Rows are turned off: the managed profile patch block carries trailing `{ id, disabled: true }` rows. */
   disabled?: boolean
   /** Change-detection fingerprint of the spec that produced this install. */
   spec: SpecFingerprint
@@ -90,11 +82,6 @@ export interface SpecEntry {
   ref: string
   /** Allow pnpm build scripts for this source (never auto-approved). */
   allowBuild: boolean
-  /**
-   * Install channel; defaults to 'profile'. 'workspace' installs into the
-   * plugin's isolated .venv and never edits the profile manifest.
-   */
-  channel?: 'profile' | 'workspace'
 }
 
 /** A requirements file: dependency spec + per-mode plugin lists. */
@@ -110,7 +97,7 @@ export interface RequirementsSpec {
 
 /** One reconciliation action computed from spec vs ledger. */
 export interface PlanAction {
-  action: 'install' | 'uninstall' | 'update' | 'keep'
+  action: 'install' | 'uninstall' | 'update' | 'keep' | 'disable' | 'enable'
   profile: string
   id: string
   reason: string
@@ -125,7 +112,6 @@ export interface SpecFingerprint {
   adapterDir: string
   ref: string
   allowBuild: boolean
-  channel?: 'profile' | 'workspace'
 }
 
 /** A line of operation progress, surfaced to CLI and the Web UI. */
@@ -143,9 +129,9 @@ export interface PackageManagerConfig {
   /** Pull + restore the configured repo automatically when the service mounts. */
   autoSync: boolean
   /**
-   * Root for per-plugin workspaces. Each install lives in
-   * `<workspaceRoot>/<profile>/<id>` with its isolated `.venv` dependency
-   * layer. Empty means `<home>/package-manager/plugin-workspaces`.
+   * Root for per-plugin AI/custom-adapter workspaces. dsh-bundle installs
+   * do not use this directory; empty means
+   * `<home>/package-manager/plugin-workspaces`.
    */
   workspaceRoot: string
 }
@@ -217,12 +203,6 @@ export interface InstallRequest {
   id?: string
   source: string
   adapter: 'auto' | 'dsh-bundle' | 'custom'
-  /**
-   * Install channel; defaults to 'profile'. 'workspace' mounts the bundle
-   * patch rows through a per-workspace Cordis Include subtree and never
-   * edits the profile manifest.
-   */
-  channel?: 'profile' | 'workspace'
   /** Required when adapter is custom; resolved against the requirements file when restoring. */
   adapterDir?: string
   /**
@@ -258,6 +238,19 @@ export interface SyncRequest {
   dryRun?: boolean
 }
 
+/** Result of scheduling a backend restart. */
+export interface RestartResult {
+  restarting: boolean
+  /** The relaunch command the restarter will run. */
+  command: string
+  /** Log file the relaunched process appends to. */
+  log: string
+  /** Restarter process id. */
+  pid: number
+  /** Port the restarter waits to free before relaunching. */
+  port: number
+}
+
 export interface AdapterInitRequest {
   source: string
   id: string
@@ -273,13 +266,11 @@ export interface InstallResult {
   id: string
   adapter: string
   packageName: string
-  /** Install channel that produced this entry. */
-  channel: 'profile' | 'workspace'
-  /** Absolute isolated dependency layer (`.venv`) created for this install. */
+  /** Optional custom-adapter dependency layer (`.venv`) for this install. */
   pluginEnvDir: string
   /** Absolute plugin workspace owning the dependency layer. */
   workspaceDir: string
-  /** True when the plugin was mounted live through Cordis (no restart needed). */
+  /** True when the managed cordis.patch.yml block was written; the host watcher applies it live (no restart needed). */
   hotMounted: boolean
   steps: StepRecord[]
   logs: OperationLog[]
@@ -299,7 +290,7 @@ export interface RestoreResult {
 export interface UninstallResult {
   profile: string
   id: string
-  /** True when the live Cordis fiber was disposed before inverse replay. */
+  /** True when the managed cordis.patch.yml block was removed; the host watcher unloads the rows live. */
   hotUnmounted: boolean
   steps: StepRecord[]
   logs: OperationLog[]
@@ -328,32 +319,13 @@ export interface AdapterContext {
   profileDir: string
   /** Per-install scratch directory (clones, downloads, backups). */
   workDir: string
-  /** Per-plugin workspace (the AI session cwd); contains `.venv`. */
+  /** Per-plugin workspace (the AI session cwd; custom adapters may use `.venv`). */
   workspaceDir?: string
-  /** Isolated dependency layer inside workspaceDir (the plugin ".venv"). */
+  /** Optional custom-adapter dependency layer inside workspaceDir (the plugin ".venv"). */
   pluginEnvDir?: string
   source: string
   ref: string
   log: (level: OperationLog['level'], message: string) => void
-}
-
-/** In-process Cordis hot-plug seam used by the Service, mocked by tests/CLI. */
-export interface PackageManagerRuntime {
-  /** True when the runtime recomposes the profile include (best layering). */
-  readonly composesProfile?: boolean
-  /** Which install channel this runtime serves; entries of the other channel are not hot-mounted by it. */
-  readonly channel?: 'profile' | 'workspace'
-  /** Mount the installed bundle's patch rows (or package root fallback). */
-  mount(entry: LedgerEntry): Promise<RuntimeMountResult>
-  /** Dispose the live fiber (or all fibers of the module) before inverse replay. */
-  unmount(entry: LedgerEntry): Promise<RuntimeMountResult>
-  /** Disable or re-enable the live rows without uninstalling anything. */
-  setDisabled(entry: LedgerEntry, disabled: boolean): Promise<RuntimeMountResult>
-}
-
-export interface RuntimeMountResult {
-  mounted: boolean
-  reason: string
 }
 
 /** Minimal request from the simplified settings tab: one link, dispatch to AI. */

@@ -69,4 +69,41 @@ describe('process host adapters', () => {
     expect(host.name).toBe('local (subprocess unavailable)')
     await expect(host.git(['--version'], process.cwd())).resolves.toMatchObject({ exitCode: 0 })
   })
+
+  it('harness host wraps win32 shell commands in a temp .cmd file', async () => {
+    if (process.platform !== 'win32') return
+    const spawn = vi.fn((_spec: { argv: string[] }) => ({
+      done: Promise.resolve({ exitCode: 0, signal: null }),
+      collected: {
+        stdout: { readFrom: () => ({ text: '', nextOffset: 0, lossy: false }) },
+        stderr: { readFrom: () => ({ text: '', nextOffset: 0, lossy: false }) },
+      },
+    }))
+    const subprocess = {
+      resolveExecutable: async (command: string) => command,
+      spawn,
+    }
+    const ctx = { get: (name: string) => name === 'subprocess' ? subprocess : undefined }
+    const host = new HarnessHost(ctx as never, subprocess as never)
+    // A command with embedded quotes — the case cmd /s /c quote rules break.
+    await host.shell('node -e "console.log(1)"', 'D:/work', {})
+    const spec = spawn.mock.calls[0]?.[0] as { argv: string[] }
+    expect(spec?.argv[0]).toMatch(/cmd\.exe$/i)
+    expect(spec?.argv[4]).toMatch(/dsh-pm-.*\.cmd$/)
+    // The temp file is cleaned up after the run.
+    const bat = spec?.argv[4] ?? ''
+    expect(require('node:fs').existsSync(bat)).toBe(false)
+  })
+
+  it('shell falls back to the local host when the harness subprocess fails', async () => {
+    const subprocess = {
+      resolveExecutable: async () => { throw new Error('resolution failure') },
+      spawn: () => { throw new Error('unreachable') },
+    }
+    const ctx = { get: (name: string) => name === 'subprocess' ? subprocess : undefined }
+    const host = new HarnessHost(ctx as never, subprocess as never)
+    const result = await host.shell('node -e "console.log(1)"', process.cwd(), {})
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain('1')
+  })
 })

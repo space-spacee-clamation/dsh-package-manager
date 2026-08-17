@@ -71,6 +71,11 @@ adapter 加载时，在解析相对路径之前展开以下占位符：
 所有 step 必须提供表中列出的字符串字段；`command` / `check` 的 `env` 是
 字符串值到字符串值的映射。`cwd` 缺省为 profile 目录。
 
+pnpm 11 的 `allowBuilds` 按依赖选择器匹配。`file:./pkg` 安装的包如果带
+build script，`package` 必须写 `name@file:pkg`（例如
+`@deepseek-harness-tui/dsh-tui@file:pkg`），只写包名会触发
+`ERR_PNPM_IGNORED_BUILDS`。
+
 ## 逆操作与回滚
 
 - 包管理器不信任单独编写的 uninstall 脚本：每个 `install` step 在执行时

@@ -2,10 +2,10 @@
  * Bundle patch parsing for the dsh-bundle hot-plug fast path.
  *
  * A DSH bundle is a *distribution format*: its `cordis.patch.yml` lists the
- * loader entries that the profile composition would mount after a restart.
- * Hot-plugging therefore mounts those patch rows through `ctx.loader`, not the
- * bundle package itself. This module only parses and flattens the patch file;
- * the loader interaction lives in `src/cordisRuntime.ts`.
+ * loader entries the profile composition mounts. The package manager writes
+ * those patch rows into the profile's own `cordis.patch.yml` managed block;
+ * the host's `watchUserPatches` performs the loader diff. This module only
+ * parses/normalizes the patch file (`src/profilePatch.ts` writes the block).
  * @module @dsh-ext/dsh-package-manager/bundlePatch
  */
 

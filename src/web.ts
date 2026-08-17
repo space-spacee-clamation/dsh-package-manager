@@ -24,12 +24,25 @@ const MAX_BODY_BYTES = 1024 * 1024
 export function apply(ctx: Context): void {
   const { manager, apiPrefix } = ctx.packageManager
   ctx.effect(
-    () => ctx.webServer.register({ kind: 'prefix', path: apiPrefix, handler: handle(ctx.packageManager, apiPrefix) }),
+    () => ctx.webServer.register({ kind: 'prefix', path: apiPrefix, handler: handle(ctx, ctx.packageManager, apiPrefix) }),
     'package-manager-web: /pm-api route',
   )
 }
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => Promise<void>
+
+/**
+ * Exit the backend process gracefully after a restart response: prefer the
+ * host's cmdline exit (runs the full dispose chain), fall back to a hard exit.
+ */
+function exitBackend(ctx: Context): void {
+  const cmdline = ctx.get('cmdline') as { exit?: (code: number) => void } | undefined
+  if (cmdline?.exit !== undefined) {
+    cmdline.exit(0)
+  } else {
+    setTimeout(() => process.exit(0), 200)
+  }
+}
 
 /**
  * Strip the registered prefix from a pathname the webserver routed here.
@@ -45,11 +58,14 @@ function subpath(pathname: string, prefix: string): string {
   return pathname
 }
 
-function handle(service: PackageManagerService, apiPrefix: string): Handler {
+function handle(ctx: Context, service: PackageManagerService, apiPrefix: string): Handler {
   return async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
     const path = subpath(url.pathname, apiPrefix)
     try {
+      if (req.method === 'GET' && path === '/health') {
+        return send(res, 200, { ok: true, value: { pid: process.pid, build: 'bat-bare-fix-2' } })
+      }
       if (req.method === 'GET' && path === '/state') return send(res, 200, { ok: true, value: service.state() })
       if (req.method === 'GET' && path === '/workspace-history') {
         return send(res, 200, {
@@ -68,6 +84,15 @@ function handle(service: PackageManagerService, apiPrefix: string): Handler {
       if (req.method === 'POST' && path === '/sync-configured') return dispatch(res, req, () => service.syncConfigured())
       if (req.method === 'POST' && path === '/disable') return dispatch(res, req, body => service.disable(body as unknown as ToggleRequest))
       if (req.method === 'POST' && path === '/enable') return dispatch(res, req, body => service.enable(body as unknown as ToggleRequest))
+      if (req.method === 'POST' && path === '/restart') {
+        assertCsrf(req)
+        const body = await readBody(req)
+        const result = service.restart(typeof body.command === 'string' ? body.command : undefined)
+        // Answer first, then exit: the restarter is already up and waits for
+        // the port to free.
+        setTimeout(() => exitBackend(ctx), 400)
+        return send(res, 200, { ok: true, value: result })
+      }
       if (req.method === 'POST' && path === '/restart/clear') {
         assertCsrf(req)
         service.clearRestartMarker()

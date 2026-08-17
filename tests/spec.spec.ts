@@ -110,17 +110,10 @@ modes:
     expect(actions.find(action => action.id === 'a')?.action).toBe('update')
   })
 
-  it('parses the channel field and treats a channel change as an update', () => {
-    const spec = parseRequirements('version: 1\nmodes:\n  web:\n    - { id: a, source: github:o/a, channel: workspace }\n', '.')
-    expect(spec.modes.web?.[0]?.channel).toBe('workspace')
-    expect(() => parseRequirements('version: 1\nmodes:\n  web:\n    - { id: a, source: github:o/a, channel: sideways }\n', '.'))
-      .toThrow('channel must be')
-
-    const ledger: Ledger = { version: 1, profiles: {} }
-    setEntry(ledger, entry('web', 'a', 'github:o/a'))
-    const switched = parseRequirements('version: 1\nmodes:\n  web:\n    - { id: a, source: github:o/a, channel: workspace }\n', '.')
-    const actions = planRestore(switched, ledger)
-    expect(actions.find(action => action.id === 'a')?.action).toBe('update')
+  it('ignores removed channel syntax and still parses the entry', () => {
+    const spec = parseRequirements('version: 1\nmodes:\n  web:\n    - { id: a, source: github:o/a, channel: legacy }\n', '.')
+    expect(spec.modes.web?.[0]?.id).toBe('a')
+    expect('channel' in (spec.modes.web?.[0] ?? {})).toBe(false)
   })
 })
 

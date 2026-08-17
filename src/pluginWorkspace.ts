@@ -1,7 +1,9 @@
 /**
- * Per-plugin workspace layout: a directory the AI session owns as its cwd,
- * containing `.venv` — the isolated dependency layer the package manager
- * installs into. The durable workspace manifest is the bridge between the
+ * Per-plugin workspace layout: a directory the AI session owns as its cwd.
+ * dsh-bundle installs do NOT use this directory (they are profile
+ * dependencies + a cordis.patch.yml managed block); custom adapters may use
+ * `${DSH_PLUGIN_ENV}` here for their own isolated files. The durable
+ * workspace manifest is the bridge between the
  * filesystem path and the pm_install/pm_scaffold AI tools: tools only act on
  * workspaces created by the settings tab, never on arbitrary session cwds.
  * @module @dsh-ext/dsh-package-manager/pluginWorkspace
@@ -34,7 +36,7 @@ export function pluginWorkspaceDir(root: string, profile: string, id: string): s
   return join(root, profile, safePluginId(id))
 }
 
-/** `<workspace>/<profile>/<safe-id>/.venv` — the isolated dependency layer. */
+/** `<workspace>/<profile>/<safe-id>/.venv` — optional custom-adapter dependency layer. */
 export function pluginEnvDir(workspaceDir: string): string {
   return join(workspaceDir, PLUGIN_ENV_DIRNAME)
 }

@@ -4,18 +4,18 @@
 
 ## 设置页
 
-### 插件工作区菜单
+### 包管理菜单
 
 安装后会出现两个入口：
 
-- 设置列表一级菜单 **插件工作区**（`settings.section`，id `package-manager`）；
+- 设置列表一级菜单 **插件管理**（`settings.section`，id `package-manager`）；
 - Plugins 设置区的 **包管理** tab。
 
 两个入口共用同一页面。
 
 ### 工作区页面
 
-默认进入“插件工作区”页：
+默认进入“插件管理”页：
 
 - 顶部路径栏显示当前 `workspaceRoot`，可从本地历史路径或默认路径切换；
 - 历史路径写入 `<home>/package-manager/runtime/workspace-history.json`，最多保留 20 条；
@@ -25,9 +25,12 @@
 
 “详细设置”页保留原有表单布局。
 
-### 虚拟环境设置
+### 工作区根目录设置
 
-- `workspaceRoot` 空 = `<home>/package-manager/plugin-workspaces`；
+- `workspaceRoot` 是 AI 安装会话与 custom adapter 的工作根目录；空 =
+  `<home>/package-manager/plugin-workspaces`；
+- dsh-bundle 不使用这个目录：依赖装在 profile，热装卸块在 profile
+  `cordis.patch.yml`；
 - 相对路径按 `$DSH_HOME` 解析；
 - 页面显示当前生效路径，并提供“使用默认”一键恢复；
 - `config.json` 示例：
@@ -92,7 +95,9 @@ dpm config --workspace-root D:\dsh-plugin-workspaces \
 dpm sync-configured
 ```
 
-CLI 使用纯 core，不带 Cordis 运行时：安装成功后写 restart marker，不会热挂载。
+CLI 使用纯 core：dsh-bundle 安装同样写 profile `cordis.patch.yml` 托管块。
+如果 DSH 正在运行，宿主 watcher 会直接热挂载；如果 DSH 未运行，下次启动由
+用户层托管块恢复，无需 restart marker。只有 custom adapter 会写 restart 提示。
 
 ## Web API
 
@@ -106,7 +111,7 @@ CLI 使用纯 core，不带 Cordis 运行时：安装成功后写 restart marker
 | `POST` | `/pm-api/ai-install` | 创建插件工作区 + AI 会话并派发安装（`AiInstallRequest`） |
 | `POST` | `/pm-api/install` | 安装插件（`InstallRequest`） |
 | `POST` | `/pm-api/uninstall` | 卸载插件（`UninstallRequest`） |
-| `POST` | `/pm-api/disable` | 关闭插件（记录参数后卸载，可重新打开） |
+| `POST` | `/pm-api/disable` | 关闭插件（dsh-bundle 热禁用补丁行并保留安装；其余记录参数后卸载） |
 | `POST` | `/pm-api/enable` | 重新打开已关闭插件 |
 | `POST` | `/pm-api/restore` | 从 requirements 文件复原 |
 | `POST` | `/pm-api/sync` | 拉取 requirements 仓库并复原 |
@@ -157,10 +162,12 @@ await manager.syncConfigured()
 manager.adapterInit({ source: 'github:owner/repo', id: 'repo', outDir: '.' })
 ```
 
-- `createPackageManager()`：纯 core，适合 CLI、脚本和测试；不会热挂载，会写
-  restart marker。
-- `PackageManagerService`：在 Cordis Context 中创建 service，自动携带
-  `CordisRuntime`；存在 `ctx.loader` 时走原生 loader/HMR，否则回退 `ctx.plugin`。
+- `createPackageManager()`：纯 core，适合 CLI、脚本和测试。dsh-bundle 安装
+  总是把托管块写进 profile `cordis.patch.yml`；如果 DSH 正在运行，宿主的
+  `watchUserPatches` 会直接热挂载，CLI 进程本身不接触 Loader。
+- `PackageManagerService`：在 Cordis Context 中创建 service。它不导入
+  Loader、不建 Include 子树、不重算 profile；热装卸完全由宿主
+  `watchUserPatches` 完成。
 - 导出：`PackageManager`、`createPackageManager`、`idFromSource`、
   `PackageManagerService`、`Config` 及全部 wire 类型。
 
@@ -175,7 +182,7 @@ manager.adapterInit({ source: 'github:owner/repo', id: 'repo', outDir: '.' })
 
 `--ref` 可固定 git 分支 / tag / commit。git 源默认不自动允许 pnpm build
 script；遇到 build script 错误时按提示重跑并加 `--allow-build`。允许列表写在
-插件 `.venv` 的 pnpm-workspace 中，卸载时撤销。
+profile 自己的 `pnpm-workspace.yaml` 中，卸载时撤销。
 
 ## requirements 仓库
 
@@ -217,7 +224,7 @@ modes:
 | `$DSH_HOME` | harness home；未设置时为 `~/.dsh` |
 | `<home>/profiles/<name>` | profile 目录（package.json、cordis.patch.yml、pnpm-workspace.yaml） |
 | `<workspaceRoot>/<profile>/<id>` | 插件专属工作区（AI 会话 cwd） |
-| `<workspaceRoot>/<profile>/<id>/.venv` | 插件隔离依赖层（类似 Python venv） |
+| `<workspaceRoot>/<profile>/<id>` | AI 安装会话的 cwd（custom adapter 可用 `${DSH_PLUGIN_ENV}` 指向其 `.venv`；dsh-bundle 不使用它） |
 | `<home>/package-manager/ledger.json` | 已安装插件 ledger |
 | `<home>/package-manager/config.json` | 工作区根目录、包存储路径、远程 URL、自动同步开关 |
 | `<home>/package-manager/disabled.json` | 已关闭插件的原安装参数 |

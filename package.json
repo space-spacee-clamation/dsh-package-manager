@@ -1,6 +1,6 @@
 {
   "name": "@dsh-ext/dsh-package-manager",
-  "description": "DSH package manager plugin: install/uninstall plugins into configurable per-plugin workspaces with isolated .venv dependency layers, hot-plug dsh-bundle plugins through Cordis, dispatch installation to an AI session, and restore plugin sets from a requirements file.",
+  "description": "DSH package manager plugin: install dsh-bundle plugins as profile dependencies and hot mount/unmount their bundle patch rows through the official watchUserPatches cordis.patch.yml reload path — no restart, no workspace/.venv second pipeline.",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -61,9 +61,7 @@
     "@deepseek-ai/dsh-subprocess": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-workspace": "^0.1.0-rc.6",
-    "@deepseek-ai/schemastery": "^3.18.1",
-    "@deepseek-ai/cordis-plugin-include": "^1.0.6",
-    "@deepseek-ai/cordis-plugin-loader": "^1.0.2"
+    "@deepseek-ai/schemastery": "^3.18.1"
   },
   "dependencies": {
     "yaml": "^2.8.0"
@@ -96,12 +94,6 @@
   "license": "MIT",
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-subprocess": {
-      "optional": true
-    },
-    "@deepseek-ai/cordis-plugin-include": {
-      "optional": true
-    },
-    "@deepseek-ai/cordis-plugin-loader": {
       "optional": true
     }
   }

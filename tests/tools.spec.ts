@@ -30,7 +30,7 @@ describe('package-manager AI tools', () => {
     }
     apply(ctx as never)
     expect(name).toBe('package-manager-tools')
-    expect(registered.map(definition => definition.name).sort()).toEqual(['pm_install', 'pm_scaffold', 'pm_switch_workspace'])
+    expect(registered.map(definition => definition.name).sort()).toEqual(['pm_install', 'pm_restart_backend', 'pm_scaffold', 'pm_switch_workspace'])
   })
 
   it('pm_scaffold only acts on package-manager plugin workspaces', async () => {

@@ -56,10 +56,6 @@ function parseEntry(raw: unknown, where: string): SpecEntry {
   if (ref !== undefined && typeof ref !== 'string') throw new Error(`requirements: ${where}.ref must be a string`)
   const allowBuild = value.allowBuild
   if (allowBuild !== undefined && typeof allowBuild !== 'boolean') throw new Error(`requirements: ${where}.allowBuild must be a boolean`)
-  const channel = value.channel
-  if (channel !== undefined && channel !== 'profile' && channel !== 'workspace') {
-    throw new Error(`requirements: ${where}.channel must be 'profile' or 'workspace'`)
-  }
   return {
     id,
     source,
@@ -67,13 +63,12 @@ function parseEntry(raw: unknown, where: string): SpecEntry {
     adapterDir: adapterDir ?? '',
     ref: ref ?? '',
     allowBuild: allowBuild ?? false,
-    ...(channel === undefined ? {} : { channel }),
   }
 }
 
 /** Change-detection fingerprint of a spec entry. */
 export function fingerprint(entry: SpecEntry): SpecFingerprint {
-  return { source: entry.source, adapter: entry.adapter, adapterDir: entry.adapterDir, ref: entry.ref, allowBuild: entry.allowBuild, ...(entry.channel === undefined ? {} : { channel: entry.channel }) }
+  return { source: entry.source, adapter: entry.adapter, adapterDir: entry.adapterDir, ref: entry.ref, allowBuild: entry.allowBuild }
 }
 
 /** Resolve an adapter dir relative to the requirements file (absolute paths pass through). */
@@ -123,7 +118,9 @@ function planModes(
       if (current === undefined) {
         actions.push({ action: 'install', profile: mode, id: entry.id, reason: 'declared in requirements, not installed', entry })
       } else if (sameFingerprint(fingerprint(entry), current.spec)) {
-        actions.push({ action: 'keep', profile: mode, id: entry.id, reason: 'installed state matches', entry, current })
+        actions.push(current.disabled === true
+          ? { action: 'enable', profile: mode, id: entry.id, reason: 'installed state matches but the plugin is switched off', entry, current }
+          : { action: 'keep', profile: mode, id: entry.id, reason: 'installed state matches', entry, current })
       } else {
         actions.push({ action: 'update', profile: mode, id: entry.id, reason: 'source or adapter changed', entry, current })
       }
@@ -148,7 +145,6 @@ function sameFingerprint(left: SpecFingerprint, right: SpecFingerprint): boolean
     && left.adapterDir === right.adapterDir
     && left.ref === right.ref
     && left.allowBuild === right.allowBuild
-    && (left.channel ?? 'profile') === (right.channel ?? 'profile')
 }
 
 /** All ids a mode currently holds. */
