@@ -132,6 +132,13 @@ Web 设置页的链接输入会创建 AI 会话并派发 `pm_install`。详细 A
 | [docs/ai-tools.md](docs/ai-tools.md) | AI 安装流程与工具契约 |
 | [docs/development.md](docs/development.md) | 构建、测试与本地开发 |
 
+## UI 参考
+
+设置页视觉样式参考
+[Dannimations/Browser-extensions-manager-ui](https://github.com/Dannimations/Browser-extensions-manager-ui)
+（Frontend Mentor 的 Browser extensions manager UI challenge）：
+浅蓝渐变背景、白色卡片、中性描边、红/灰开关状态。交互与业务逻辑为本项目独立实现。
+
 ## License
 
 [MIT](LICENSE)。
