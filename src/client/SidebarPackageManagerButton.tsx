@@ -47,6 +47,7 @@ const overlayStyle: CSSProperties = {
 }
 
 const panelStyle: CSSProperties = {
+  boxSizing: 'border-box',
   position: 'absolute',
   top: '50%',
   left: '50%',
@@ -63,6 +64,7 @@ const panelStyle: CSSProperties = {
 }
 
 const panelContentStyle: CSSProperties = {
+  boxSizing: 'border-box',
   flex: 1,
   minHeight: 0,
   overflow: 'hidden',

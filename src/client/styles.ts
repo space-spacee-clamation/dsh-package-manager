@@ -26,13 +26,13 @@ const ACCENT_BORDER = '#C7D4FA'
 
 export const styles: Record<string, CSSProperties> = {
   workspaceRoot: {
-    position: 'relative', display: 'flex', flexDirection: 'column', height: '100%',
+    boxSizing: 'border-box', position: 'relative', display: 'flex', flexDirection: 'column', height: '100%',
     minHeight: 0, maxWidth: 1320, width: '100%', margin: '0 auto', gap: 16,
     padding: '20px 24px 22px', overflow: 'hidden', background: CANVAS, color: TEXT,
     fontFamily: "'Noto Sans', 'Segoe UI', sans-serif",
   },
   settingsRoot: {
-    display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 960, width: '100%',
+    boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 960, width: '100%',
     margin: '0 auto', padding: '0 0 40px', background: 'transparent', color: TEXT,
     fontFamily: "'Noto Sans', 'Segoe UI', sans-serif",
   },
