@@ -99,6 +99,74 @@ export function apply(ctx: Context): void {
   }))
 
   ctx.tools.register(defineTool({
+    name: 'pm_switch_workspace',
+    description:
+      'Switch the package-manager active workspace root and reconcile the installed plugin set. '
+      + 'If the target directory contains requirements/deps.yaml (or deps.yaml), the manager installs '
+      + 'plugins declared there, updates changed specs, and uninstalls plugins that are not declared '
+      + '(including modes that are absent from the file). If the target has no requirements file, '
+      + 'only the workspace root changes and the installed set stays untouched. Use dryRun=true to '
+      + 'preview the diff before applying it.',
+    parameters: {
+      path: {
+        type: 'string',
+        description: 'Absolute workspace root directory to switch to; empty string selects the default root.',
+      },
+      dryRun: {
+        type: 'boolean',
+        description: 'Only compute the install/uninstall diff without changing anything. Defaults to false.',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean', required: true },
+          workspaceRoot: { type: 'string', required: true },
+          requirementsFile: { type: 'string', required: true },
+          actions: { type: 'array', items: { type: 'string' }, required: true },
+          installed: { type: 'array', items: { type: 'string' }, required: true },
+          uninstalled: { type: 'array', items: { type: 'string' }, required: true },
+          updated: { type: 'array', items: { type: 'string' }, required: true },
+          logs: { type: 'array', items: { type: 'string' }, required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.ok
+          ? `Workspace switched to ${value.workspaceRoot}
+requirements: ${value.requirementsFile || '(none)'}
+plan:
+${value.actions.join(' ; ')}
+installed: ${value.installed.join(', ') || '—'}
+uninstalled: ${value.uninstalled.join(', ') || '—'}`
+          : `Workspace switch failed: ${value.logs.join(' ; ')}`,
+      }],
+    },
+    isConcurrencySafe: () => false,
+    async execute(args) {
+      const path = typeof args.path === 'string' ? args.path : ''
+      const result = await service.switchWorkspace(path, args.dryRun === true)
+      return {
+        ok: true,
+        workspaceRoot: service.workspaceRoot(),
+        requirementsFile: result.file,
+        actions: result.actions.map(action => `${action.action}: ${action.profile}/${action.id} — ${action.reason}`),
+        installed: result.installed.map(item => `${item.profile}/${item.id}`),
+        uninstalled: result.uninstalled.map(item => `${item.profile}/${item.id}`),
+        updated: result.updated.map(item => `${item.profile}/${item.id}`),
+        logs: result.logs.map(line => `[${line.level}] ${line.message}`),
+      }
+    },
+    presentCall: () => ({
+      card: 'terminal',
+      title: 'Package manager',
+      description: 'Switching plugin workspace and reconciling plugins',
+    }),
+  }))
+
+  ctx.tools.register(defineTool({
     name: 'pm_scaffold',
     description:
       'Generate a requirements entry and custom adapter scaffold for a plugin the built-in dsh-bundle '

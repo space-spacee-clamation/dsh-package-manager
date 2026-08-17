@@ -19,6 +19,7 @@
 
 - 顶部路径栏显示当前 `workspaceRoot`，可从本地历史路径或默认路径切换；
 - 历史路径写入 `<home>/package-manager/runtime/workspace-history.json`，最多保留 20 条；
+- **切换路径会自动对齐**：目标目录存在 `requirements/deps.yaml` 时，安装目标声明但未安装的插件，关闭目标未声明的插件（包括目标文件里完全没有的 profile）；目标目录没有 requirements 文件时只切换 `workspaceRoot`，不动已安装集合；
 - 中间插件列表为卡片布局，只有该区域滚动；开关立即启用/关闭，删除需二次确认；
 - 底部固定“链接输入栏 + 派发给 AI 安装”。
 
@@ -48,6 +49,10 @@
 4. AI 调用 `pm_install` 完成安装；需要自定义 adapter 时调用 `pm_scaffold`。
 
 对应 HTTP 调用见下文 `/pm-api/ai-install`。
+
+路径栏切换调用 `POST /pm-api/workspace/switch`，等价于先写
+`workspaceRoot`，再对目标 `requirements/deps.yaml` 做一次包含全部已知
+profile 的对齐。
 
 ## CLI
 

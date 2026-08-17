@@ -1,9 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ensureProfile, readManifest, writeManifest } from '../src/profile.ts'
-import { StepExecutor, validateStepSpec, type PnpmRunner } from '../src/steps.ts'
+import { StepExecutor, validateStepSpec, type DshRunner, type PnpmRunner } from '../src/steps.ts'
 import type { AdapterContext, OperationLog, SpawnResult } from '../src/types.ts'
 
 const roots: string[] = []
@@ -106,6 +106,35 @@ describe('StepExecutor file steps', () => {
 })
 
 describe('StepExecutor profile steps', () => {
+  it('prefers the existing dsh plugin add/remove tool for profile dependencies', async () => {
+    const dir = tempDir()
+    ensureProfile(dir, 'web')
+    const calls: string[][] = []
+    const fakeDsh: DshRunner = async (args, cwd): Promise<SpawnResult> => {
+      calls.push(args)
+      expect(cwd).toBe(dir)
+      const manifest = readManifest(cwd)
+      const deps = { ...(manifest.dependencies ?? {}) }
+      const verb = args[3]
+      if (verb === 'add') deps['fake-pkg'] = args[4] ?? 'file:fixture'
+      else if (verb === 'remove') delete deps[args[4] ?? '']
+      manifest.dependencies = deps
+      writeManifest(cwd, manifest)
+      return { exitCode: 0, stdout: '', stderr: '' }
+    }
+    const executor = new StepExecutor(fakePnpm(), async () => ({ exitCode: 0, stdout: '', stderr: '' }), fakeDsh)
+    const records = await executor.run(
+      [{ uses: 'profile.dependency.add', spec: 'file:fixture', packageName: 'fake-pkg' }],
+      ctx(dir, dir),
+      join(dir, 'backups'),
+    )
+    expect(calls).toEqual([['plugin', '--profile', basename(dir), 'add', 'file:fixture']])
+    expect(readManifest(dir).dependencies?.['fake-pkg']).toBe('file:fixture')
+    await executor.rollback(records, ctx(dir, dir), join(dir, 'backups'))
+    expect(calls[1]).toEqual(['plugin', '--profile', basename(dir), 'remove', 'fake-pkg'])
+    expect(readManifest(dir).dependencies?.['fake-pkg']).toBeUndefined()
+  })
+
   it('adds and removes dependencies with pnpm, recording the resolved package name', async () => {
     const dir = tempDir()
     ensureProfile(dir, 'web')
@@ -121,7 +150,7 @@ describe('StepExecutor profile steps', () => {
     expect(readManifest(dir).dependencies?.['fake-pkg']).toBeUndefined()
   })
 
-  it('reconcile records the previous bundle list as its inverse', async () => {
+  it('reconcile records a noop inverse when it adds nothing', async () => {
     const dir = tempDir()
     ensureProfile(dir, 'custom')
     const manifest = readManifest(dir)
@@ -129,13 +158,67 @@ describe('StepExecutor profile steps', () => {
     writeManifest(dir, manifest)
     const executor = new StepExecutor(fakePnpm(), async () => ({ exitCode: 0, stdout: '', stderr: '' }))
     const records = await executor.run(
+      [{ uses: 'profile.bundles.reconcile', packageName: 'fixture-bundle' }],
+      ctx(dir, dir),
+      join(dir, 'backups'),
+    )
+    // No node_modules here: reconcile adds nothing, and the host may already
+    // have reconciled on its own path — restoring a list snapshot would
+    // clobber rows the host or the user added later, so the inverse is a noop.
+    expect(records[0]?.inverse.uses).toBe('noop')
+    await executor.rollback(records, ctx(dir, dir), join(dir, 'backups'))
+    expect(readManifest(dir).dsh?.profile?.bundles).toEqual(['@deepseek-ai/dsh-base'])
+  })
+
+  it('reconcile records a targeted remove inverse for the row it added', async () => {
+    const dir = tempDir()
+    ensureProfile(dir, 'custom')
+    mkdirSync(join(dir, 'node_modules', 'fixture-bundle'), { recursive: true })
+    writeFileSync(join(dir, 'node_modules', 'fixture-bundle', 'package.json'), JSON.stringify({
+      name: 'fixture-bundle',
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+    }))
+    const manifest = readManifest(dir)
+    manifest.dependencies = { 'fixture-bundle': 'file:../fixture' }
+    writeManifest(dir, manifest)
+    const executor = new StepExecutor(fakePnpm(), async () => ({ exitCode: 0, stdout: '', stderr: '' }))
+    const records = await executor.run(
+      [{ uses: 'profile.bundles.reconcile', packageName: 'fixture-bundle' }],
+      ctx(dir, dir),
+      join(dir, 'backups'),
+    )
+    expect(records[0]?.inverse).toEqual({ uses: 'profile.bundles.remove', package: 'fixture-bundle' })
+    expect(readManifest(dir).dsh?.profile?.bundles).toContain('fixture-bundle')
+    await executor.rollback(records, ctx(dir, dir), join(dir, 'backups'))
+    const after = readManifest(dir).dsh?.profile?.bundles ?? []
+    expect(after).not.toContain('fixture-bundle')
+    expect(after).toContain('@deepseek-ai/dsh-base')
+  })
+
+  it('reconcile without a declared packageName removes every row it added on rollback', async () => {
+    const dir = tempDir()
+    ensureProfile(dir, 'custom')
+    for (const name of ['pkg-a', 'pkg-b']) {
+      mkdirSync(join(dir, 'node_modules', name), { recursive: true })
+      writeFileSync(join(dir, 'node_modules', name, 'package.json'), JSON.stringify({
+        name,
+        dsh: { bundle: { patch: './cordis.patch.yml' } },
+      }))
+    }
+    const manifest = readManifest(dir)
+    manifest.dependencies = { 'pkg-a': 'file:../a', 'pkg-b': 'file:../b' }
+    writeManifest(dir, manifest)
+    const executor = new StepExecutor(fakePnpm(), async () => ({ exitCode: 0, stdout: '', stderr: '' }))
+    const records = await executor.run(
       [{ uses: 'profile.bundles.reconcile' }],
       ctx(dir, dir),
       join(dir, 'backups'),
     )
-    // No node_modules here: reconcile adds nothing, but still snapshots the list.
-    expect(records[0]?.inverse.uses).toBe('profile.bundles.set')
+    expect(records[0]?.inverse).toEqual({ uses: 'profile.bundles.removeMany', packages: ['pkg-a', 'pkg-b'] })
     await executor.rollback(records, ctx(dir, dir), join(dir, 'backups'))
-    expect(readManifest(dir).dsh?.profile?.bundles).toEqual(['@deepseek-ai/dsh-base'])
+    const after = readManifest(dir).dsh?.profile?.bundles ?? []
+    expect(after).not.toContain('pkg-a')
+    expect(after).not.toContain('pkg-b')
+    expect(after).toContain('@deepseek-ai/dsh-base')
   })
 })

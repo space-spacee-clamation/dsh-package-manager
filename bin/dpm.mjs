@@ -52,6 +52,8 @@ async function main() {
   uninstall --profile <name> --id <id> [--dry-run]
   restore   --file <requirements.yaml> [--modes a,b] [--dry-run]
   sync      --repo <path> [--file <requirements.yaml>] [--modes a,b] [--dry-run]
+  switch    --path <workspace-root> [--dry-run]
+  doctor    repair home state: prune unresolvable bundle rows, dangling links, stale ledger records
   adapter-init --source <spec> --id <id> --out-dir <dir> [--profile web] [--ref <ref>]
   config      [--workspace-root <dir>] [--storage-path <dir>] [--remote-url <url>] [--auto-sync]
   sync-configured
@@ -65,6 +67,9 @@ async function main() {
   switch (command) {
     case 'state':
       print(manager.state())
+      return
+    case 'doctor':
+      print(await manager.doctor())
       return
     case 'install': {
       const result = await manager.install({
@@ -87,6 +92,12 @@ async function main() {
         id: valueOf(['--id', '-i']) ?? '',
         dryRun: boolOf(['--dry-run']),
       })
+      printLogs(result)
+      print(result)
+      return
+    }
+    case 'switch': {
+      const result = await manager.switchWorkspace(valueOf(['--path', '-p']) ?? '', boolOf(['--dry-run']))
       printLogs(result)
       print(result)
       return

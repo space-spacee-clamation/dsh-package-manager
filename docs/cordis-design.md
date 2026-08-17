@@ -44,11 +44,11 @@
 
 安装 `dsh-bundle` 插件后，包管理器在**当前进程**内执行：
 
-1. 把源码放进 `<workspace>/<id>/.venv`；
-2. 在 `.venv` 内 `pnpm install`；
-3. profile 增加 `link:` 依赖并 reconcile bundle；
-4. `ctx.loader.create({ name: packageName })` 把插件挂进 DSH 原生 loader tree；
-   没有 loader 的合成环境才回退 `import(packageName)` + `ctx.plugin()`。
+1. profile 增加该 source 依赖并 reconcile bundle（一次 `dsh plugin` / pnpm）；
+2. 读取 `dsh.bundle.patch`，按稳定 id 把 bundle 的条目挂进 DSH 原生 loader tree；
+3. 应用 bundle 内的 id 定向 patch（`config` / `disabled`）；
+4. 没有 loader 的合成环境才回退逐行 `import` + `ctx.plugin()`。
+   
 
 卸载顺序正好相反：
 

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -81,5 +81,18 @@ describe('AI install dispatch', () => {
     const ctx = new Context()
     const service = new PackageManagerService(ctx as never, { home, apiPrefix: '/pm-api' })
     await expect(service.dispatchAiInstall({ source: 'github:owner/demo' })).rejects.toThrow('dsh-agent')
+  })
+
+  it('constructs despite a corrupt ledger so the web profile can still boot', async () => {
+    // The package-manager plugin runs inside the web profile; a throwing
+    // constructor would fail the whole profile boot (host boots are
+    // fail-loud). A corrupt ledger must degrade to an empty one at
+    // construction time (dpm doctor repairs it later).
+    const home = tempDir()
+    mkdirSync(join(home, 'package-manager'), { recursive: true })
+    writeFileSync(join(home, 'package-manager', 'ledger.json'), '{ this is not json')
+    const ctx = new Context()
+    const service = new PackageManagerService(ctx as never, { home, apiPrefix: '/pm-api', runtime: 'auto' })
+    expect(service.apiPrefix).toBe('/pm-api')
   })
 })

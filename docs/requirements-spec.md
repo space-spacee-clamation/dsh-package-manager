@@ -28,9 +28,9 @@ modes:                # 必填：profile 名 -> 插件列表（可为空）
 
 `adapter` 规则：
 
-- `dsh-bundle`：源码包 `package.json` 里声明 `dsh.bundle.patch`，源码复制到
-  插件工作区的 `.venv`，`pnpm install` 在隔离层内完成，profile 通过
-  `link:` 引用，最后 bundle reconcile。
+- `dsh-bundle`：源码包 `package.json` 里声明 `dsh.bundle.patch`，profile
+  直接安装该 source 依赖并 reconcile bundle；热挂载按 patch 的稳定 id
+  挂进 loader。
 - `custom`：使用 `adapterDir` 指向的 `adapter.yaml`。
 - `auto`：探测源码；有 bundle 声明按 dsh-bundle，否则要求提供 custom
   adapter（通常先用 `adapter-init` 生成）。

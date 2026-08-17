@@ -109,6 +109,101 @@ modes:
     await manager.uninstall({ profile: 'web', id: 'fixture' })
   }, 120_000)
 
+  it('rejects monorepo sources with workspace: dependencies before touching the profile', async () => {
+    const home = tempDir()
+    const fixture = makeBundleFixture(join(home, 'fixture'))
+    writeFileSync(join(fixture, 'package.json'), JSON.stringify({
+      name: 'fixture-bundle', version: '1.0.0', type: 'module',
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+      dependencies: { '@deepseek-ai/dsh-base': 'workspace:^' },
+    }))
+    const manager = createPackageManager({ home })
+
+    await expect(manager.install({ profile: 'web', id: 'fixture', source: fixture, adapter: 'dsh-bundle' }))
+      .rejects.toThrow('workspace: protocol')
+    const manifest = readManifest(join(home, 'profiles', 'web'))
+    expect(manifest.dependencies ?? {}).toEqual({})
+    expect(manager.state().entries).toEqual([])
+  }, 120_000)
+
+  it('rejects bundles whose declared entrypoint is unbuilt', async () => {
+    const home = tempDir()
+    const fixture = makeBundleFixture(join(home, 'fixture'))
+    writeFileSync(join(fixture, 'package.json'), JSON.stringify({
+      name: 'fixture-bundle', version: '1.0.0', type: 'module',
+      main: 'lib/index.js',
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+    }))
+    const manager = createPackageManager({ home })
+
+    await expect(manager.install({ profile: 'web', id: 'fixture', source: fixture, adapter: 'dsh-bundle' }))
+      .rejects.toThrow('declared entrypoint does not exist')
+  }, 120_000)
+
+  it('drops stale ledger records when the host profile no longer has the dependency', async () => {
+    const home = tempDir()
+    const fixture = makeBundleFixture(join(home, 'fixture'))
+    const manager = createPackageManager({ home })
+    await manager.install({ profile: 'web', id: 'fixture', source: fixture, adapter: 'dsh-bundle' })
+
+    // Simulate `dsh plugin remove`: the host drops the dependency and the
+    // bundle row together (its reconcile mirrors installed state).
+    const manifestPath = join(home, 'profiles', 'web', 'package.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      dependencies?: Record<string, unknown>
+      dsh?: { profile?: { bundles?: string[] } }
+    }
+    delete manifest.dependencies?.['fixture-bundle']
+    if (manifest.dsh?.profile !== undefined) {
+      manifest.dsh.profile.bundles = (manifest.dsh.profile.bundles ?? []).filter(name => name !== 'fixture-bundle')
+    }
+    writeFileSync(manifestPath, JSON.stringify(manifest, undefined, 2) + '\n')
+
+    expect(manager.state().entries).toEqual([])
+    const removed = await manager.uninstall({ profile: 'web', id: 'fixture' })
+    expect(removed.hotUnmounted).toBe(false)
+    expect(manager.state().entries).toEqual([])
+  }, 120_000)
+
+  it('marks a web refresh when a bundle declares a client face', async () => {
+    const home = tempDir()
+    const fixture = makeBundleFixture(join(home, 'fixture'))
+    writeFileSync(join(fixture, 'package.json'), JSON.stringify({
+      name: 'fixture-bundle', version: '1.0.0', type: 'module',
+      dsh: { bundle: { patch: './cordis.patch.yml' }, client: { platform: 'web' } },
+    }))
+    const manager = createPackageManager({ home })
+    await manager.install({ profile: 'web', id: 'fixture', source: fixture, adapter: 'dsh-bundle' })
+    expect(manager.state().webRefreshNeeded).toBe(true)
+    manager.clearWebRefreshMarker()
+    expect(manager.state().webRefreshNeeded).toBe(false)
+    await manager.uninstall({ profile: 'web', id: 'fixture' })
+  }, 120_000)
+
+  it('uninstall removes only its own bundle row, keeping rows added later', async () => {
+    const home = tempDir()
+    const fixture = makeBundleFixture(join(home, 'fixture'))
+    const manager = createPackageManager({ home })
+    await manager.install({ profile: 'web', id: 'fixture', source: fixture, adapter: 'dsh-bundle' })
+
+    // Simulate the host (or the user) adding another bundle after this install.
+    const manifestPath = join(home, 'profiles', 'web', 'package.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      dsh?: { profile?: { bundles?: string[] } }
+    }
+    const bundles = [...(manifest.dsh?.profile?.bundles ?? []), 'other-bundle']
+    if (manifest.dsh === undefined) manifest.dsh = { profile: {} }
+    if (manifest.dsh.profile === undefined) manifest.dsh.profile = {}
+    manifest.dsh.profile.bundles = bundles
+    writeFileSync(manifestPath, JSON.stringify(manifest, undefined, 2) + '\n')
+
+    await manager.uninstall({ profile: 'web', id: 'fixture' })
+    const after = readManifest(join(home, 'profiles', 'web'))
+    expect(after.dsh?.profile?.bundles).toContain('other-bundle')
+    expect(after.dsh?.profile?.bundles).not.toContain('fixture-bundle')
+    expect(after.dependencies?.['fixture-bundle']).toBeUndefined()
+  }, 120_000)
+
   it('records switched workspace roots into the runtime history', () => {
     const home = tempDir()
     const manager = createPackageManager({ home })
@@ -121,6 +216,58 @@ modes:
     manager.setConfig({ storagePath: '', remoteUrl: '', autoSync: false, workspaceRoot: '' })
     expect(manager.state().workspaceRoot).toBe(join(home, 'package-manager', 'plugin-workspaces'))
     expect(manager.state().workspaceHistory).toEqual([root])
+  })
+
+  it('switches workspace roots and reconciles the installed set automatically', async () => {
+    const home = tempDir()
+    const manager = createPackageManager({ home })
+    const roots = [join(home, 'workspace-a'), join(home, 'workspace-b')]
+    const ids = ['plugin-a', 'plugin-b']
+    for (let index = 0; index < roots.length; index += 1) {
+      const root = roots[index]!
+      const id = ids[index]!
+      const adapterDir = join(root, 'requirements', 'adapters', id)
+      mkdirSync(adapterDir, { recursive: true })
+      writeFileSync(join(adapterDir, 'adapter.yaml'), `id: ${id}
+install:
+  - uses: file.write
+    path: \${DSH_HOME}/profiles/web/${id}.marker.txt
+    content: ${id}
+`)
+      const source = join(home, `source-${id}`)
+      mkdirSync(source, { recursive: true })
+      writeFileSync(join(source, 'package.json'), JSON.stringify({ name: id, version: '1.0.0' }))
+      mkdirSync(join(root, 'requirements'), { recursive: true })
+      writeFileSync(join(root, 'requirements', 'deps.yaml'), `version: 1
+modes:
+  web:
+    - id: ${id}
+      source: ${source}
+      adapter: custom
+      adapterDir: adapters/${id}
+`)
+    }
+
+    const first = await manager.switchWorkspace(roots[0]!)
+    expect(first.installed.map(item => item.id)).toEqual(['plugin-a'])
+    expect(existsSync(join(home, 'profiles', 'web', 'plugin-a.marker.txt'))).toBe(true)
+
+    const preview = await manager.switchWorkspace(roots[1]!, true)
+    expect(preview.uninstalled).toEqual([])
+    expect(preview.installed).toEqual([])
+    expect(preview.actions.map(action => `${action.action}:${action.id}`)).toEqual(['install:plugin-b', 'uninstall:plugin-a'])
+    expect(manager.getConfig().workspaceRoot).toBe(roots[0])
+
+    const second = await manager.switchWorkspace(roots[1]!)
+    expect(second.uninstalled.map(item => item.id)).toEqual(['plugin-a'])
+    expect(second.installed.map(item => item.id)).toEqual(['plugin-b'])
+    expect(existsSync(join(home, 'profiles', 'web', 'plugin-a.marker.txt'))).toBe(false)
+    expect(existsSync(join(home, 'profiles', 'web', 'plugin-b.marker.txt'))).toBe(true)
+    expect(manager.state().entries.map(item => item.id)).toEqual(['plugin-b'])
+
+    await manager.switchWorkspace(roots[0]!)
+    expect(manager.state().entries.map(item => item.id)).toEqual(['plugin-a'])
+    expect(existsSync(join(home, 'profiles', 'web', 'plugin-b.marker.txt'))).toBe(false)
   })
 
   it('clones and restores the configured requirements repo via syncConfigured', async () => {

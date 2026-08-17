@@ -56,6 +56,10 @@ function parseEntry(raw: unknown, where: string): SpecEntry {
   if (ref !== undefined && typeof ref !== 'string') throw new Error(`requirements: ${where}.ref must be a string`)
   const allowBuild = value.allowBuild
   if (allowBuild !== undefined && typeof allowBuild !== 'boolean') throw new Error(`requirements: ${where}.allowBuild must be a boolean`)
+  const channel = value.channel
+  if (channel !== undefined && channel !== 'profile' && channel !== 'workspace') {
+    throw new Error(`requirements: ${where}.channel must be 'profile' or 'workspace'`)
+  }
   return {
     id,
     source,
@@ -63,12 +67,13 @@ function parseEntry(raw: unknown, where: string): SpecEntry {
     adapterDir: adapterDir ?? '',
     ref: ref ?? '',
     allowBuild: allowBuild ?? false,
+    ...(channel === undefined ? {} : { channel }),
   }
 }
 
 /** Change-detection fingerprint of a spec entry. */
 export function fingerprint(entry: SpecEntry): SpecFingerprint {
-  return { source: entry.source, adapter: entry.adapter, adapterDir: entry.adapterDir, ref: entry.ref }
+  return { source: entry.source, adapter: entry.adapter, adapterDir: entry.adapterDir, ref: entry.ref, allowBuild: entry.allowBuild, ...(entry.channel === undefined ? {} : { channel: entry.channel }) }
 }
 
 /** Resolve an adapter dir relative to the requirements file (absolute paths pass through). */
@@ -88,12 +93,32 @@ export function resolveAdapterDir(spec: RequirementsSpec, adapterDir: string): s
  */
 export function planRestore(spec: RequirementsSpec, ledger: Ledger, modeFilter: readonly string[] = []): PlanAction[] {
   const modes = modeFilter.length > 0 ? [...modeFilter] : Object.keys(spec.modes)
+  return planModes(spec, ledger, modes, true)
+}
+
+/**
+ * Reconciliation plan used when switching the active workspace root. Unlike
+ * restore, modes that exist in the ledger but are absent from the target
+ * requirements file are reconciled to an empty desired set, so switching
+ * workspaces closes plugins the target does not declare.
+ */
+export function planWorkspaceSwitch(spec: RequirementsSpec, ledger: Ledger): PlanAction[] {
+  const modes = [...new Set([...Object.keys(spec.modes), ...Object.keys(ledger.profiles)])]
+  return planModes(spec, ledger, modes, false)
+}
+
+function planModes(
+  spec: RequirementsSpec,
+  ledger: Ledger,
+  modes: readonly string[],
+  requireDeclared: boolean,
+): PlanAction[] {
   const actions: PlanAction[] = []
   for (const mode of modes) {
     const desired = spec.modes[mode]
-    if (desired === undefined) throw new Error(`requirements: mode ${JSON.stringify(mode)} is not declared`)
+    if (desired === undefined && requireDeclared) throw new Error(`requirements: mode ${JSON.stringify(mode)} is not declared`)
     const currentEntries = ledger.profiles[mode] ?? {}
-    for (const entry of desired) {
+    for (const entry of desired ?? []) {
       const current = currentEntries[entry.id]
       if (current === undefined) {
         actions.push({ action: 'install', profile: mode, id: entry.id, reason: 'declared in requirements, not installed', entry })
@@ -104,10 +129,11 @@ export function planRestore(spec: RequirementsSpec, ledger: Ledger, modeFilter: 
       }
     }
     for (const id of Object.keys(currentEntries)) {
-      if (!desired.some(entry => entry.id === id)) {
+      if (!(desired ?? []).some(entry => entry.id === id)) {
         const current = currentEntries[id]
         actions.push({
-          action: 'uninstall', profile: mode, id, reason: 'not declared in requirements',
+          action: 'uninstall', profile: mode, id,
+          reason: desired === undefined ? 'mode is not declared by the target workspace' : 'not declared in requirements',
           ...(current === undefined ? {} : { current }),
         })
       }
@@ -121,6 +147,8 @@ function sameFingerprint(left: SpecFingerprint, right: SpecFingerprint): boolean
     && left.adapter === right.adapter
     && left.adapterDir === right.adapterDir
     && left.ref === right.ref
+    && left.allowBuild === right.allowBuild
+    && (left.channel ?? 'profile') === (right.channel ?? 'profile')
 }
 
 /** All ids a mode currently holds. */

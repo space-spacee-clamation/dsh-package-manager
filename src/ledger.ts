@@ -8,7 +8,8 @@
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { ledgerPath } from './paths.ts'
+import { ledgerPath, profileDir } from './paths.ts'
+import { readManifest, type ProfileManifest } from './profile.ts'
 import type { Ledger, LedgerEntry } from './types.ts'
 
 export function emptyLedger(): Ledger {
@@ -63,4 +64,55 @@ export function removeEntry(ledger: Ledger, profile: string, id: string): Ledger
 
 export function listEntries(ledger: Ledger): LedgerEntry[] {
   return Object.values(ledger.profiles).flatMap(entries => Object.values(entries))
+}
+
+/**
+ * Installed-truth check for one entry. The profile manifest is the host's
+ * authoritative plugin state (`dsh plugin` owns dependencies + bundle rows),
+ * so an entry whose recorded profile dependency and bundle row both vanished
+ * (for example the user removed it with the host CLI) is no longer installed.
+ *
+ * dsh-bundle entries check their packageName. Custom-adapter entries check
+ * the packageNames recorded by their `profile.dependency.add` steps; a custom
+ * entry that recorded no profile dependency (for example one that only copies
+ * files into the home) stays effective — its truth lives outside the profile.
+ */
+export function isEntryEffective(home: string, entry: LedgerEntry): boolean {
+  // Workspace-channel entries keep their installed-truth inside the plugin
+  // workspace (.venv), never in the profile manifest, so the profile check
+  // does not apply to them.
+  if ((entry.channel ?? 'profile') === 'workspace') return true
+  let manifest: ProfileManifest
+  try {
+    manifest = readManifest(entry.profileDir ?? profileDir(home, entry.profile))
+  } catch {
+    return true
+  }
+  const dependencies = manifest.dependencies ?? {}
+  const bundles = manifest.dsh?.profile?.bundles ?? []
+  const dependencyNames = entry.adapter === 'dsh-bundle' && entry.packageName !== ''
+    ? [entry.packageName]
+    : entry.steps
+      .filter(step => step.kind === 'profile.dependency.add')
+      .map(step => step.params['packageName'])
+      .filter((name): name is string => typeof name === 'string' && name !== '')
+  if (dependencyNames.length === 0) return true
+  return dependencyNames.some(name => dependencies[name] !== undefined || bundles.includes(name))
+}
+
+/**
+ * Read view of the ledger reconciled against profile manifests: stale
+ * dsh-bundle entries are filtered out so restore/state never report plugins
+ * the host no longer has installed. The disk ledger is not modified.
+ */
+export function loadEffectiveLedger(home: string): Ledger {
+  const ledger = loadLedger(home)
+  const effective: Ledger = { version: 1, profiles: {} }
+  for (const [profile, bucket] of Object.entries(ledger.profiles)) {
+    const entries = Object.values(bucket)
+      .filter(entry => entry !== undefined && isEntryEffective(home, entry))
+    if (entries.length === 0) continue
+    effective.profiles[profile] = Object.fromEntries(entries.map(entry => [entry.id, entry]))
+  }
+  return effective
 }

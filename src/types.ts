@@ -40,6 +40,16 @@ export interface LedgerEntry {
   steps: StepRecord[]
   /** Whether the original install request allowed pnpm build scripts. */
   allowBuild?: boolean
+  /**
+   * Install channel. 'profile' (default) installs the source as a profile
+   * dependency plus a `dsh.profile.bundles` row, composed by the host at
+   * boot; 'workspace' installs the source into the plugin's isolated `.venv`
+   * and mounts its bundle patch rows through a per-workspace Cordis Include
+   * subtree, without touching the profile manifest.
+   */
+  channel?: 'profile' | 'workspace'
+  /** Workspace-channel rows are turned off: mounted with disabled patches. */
+  disabled?: boolean
   /** Change-detection fingerprint of the spec that produced this install. */
   spec: SpecFingerprint
   installedAt: string
@@ -80,6 +90,11 @@ export interface SpecEntry {
   ref: string
   /** Allow pnpm build scripts for this source (never auto-approved). */
   allowBuild: boolean
+  /**
+   * Install channel; defaults to 'profile'. 'workspace' installs into the
+   * plugin's isolated .venv and never edits the profile manifest.
+   */
+  channel?: 'profile' | 'workspace'
 }
 
 /** A requirements file: dependency spec + per-mode plugin lists. */
@@ -109,6 +124,8 @@ export interface SpecFingerprint {
   adapter: string
   adapterDir: string
   ref: string
+  allowBuild: boolean
+  channel?: 'profile' | 'workspace'
 }
 
 /** A line of operation progress, surfaced to CLI and the Web UI. */
@@ -153,6 +170,12 @@ export interface WorkspaceHistoryRequest {
   path: string
 }
 
+export interface WorkspaceSwitchRequest {
+  /** Workspace root to switch to; empty means the default root. */
+  path: string
+  dryRun?: boolean
+}
+
 /** Read-only state view the Web UI renders. */
 export interface ManagerState {
   home: string
@@ -162,7 +185,17 @@ export interface ManagerState {
   workspaceDefault: string
   /** Recently used workspace roots persisted under `<home>/package-manager/runtime`. */
   workspaceHistory: string[]
+  /** True while a workspace switch reconciliation is executing. */
+  reconciling: boolean
+  /** Error from the last workspace switch, empty when the last switch succeeded. */
+  switchError: string
   restartNeeded: boolean
+  /**
+   * True when a bundle with a client face (`dsh.client`) was installed or
+   * removed: the host's client-module graph already updated live, but open
+   * web tabs must reload to pick the new module table up.
+   */
+  webRefreshNeeded: boolean
   profiles: ProfileState[]
   entries: LedgerEntry[]
   disabled: DisabledEntry[]
@@ -184,6 +217,12 @@ export interface InstallRequest {
   id?: string
   source: string
   adapter: 'auto' | 'dsh-bundle' | 'custom'
+  /**
+   * Install channel; defaults to 'profile'. 'workspace' mounts the bundle
+   * patch rows through a per-workspace Cordis Include subtree and never
+   * edits the profile manifest.
+   */
+  channel?: 'profile' | 'workspace'
   /** Required when adapter is custom; resolved against the requirements file when restoring. */
   adapterDir?: string
   /**
@@ -234,6 +273,8 @@ export interface InstallResult {
   id: string
   adapter: string
   packageName: string
+  /** Install channel that produced this entry. */
+  channel: 'profile' | 'workspace'
   /** Absolute isolated dependency layer (`.venv`) created for this install. */
   pluginEnvDir: string
   /** Absolute plugin workspace owning the dependency layer. */
@@ -298,10 +339,16 @@ export interface AdapterContext {
 
 /** In-process Cordis hot-plug seam used by the Service, mocked by tests/CLI. */
 export interface PackageManagerRuntime {
-  /** Import and `ctx.plugin()` a freshly installed dsh-bundle entry. */
+  /** True when the runtime recomposes the profile include (best layering). */
+  readonly composesProfile?: boolean
+  /** Which install channel this runtime serves; entries of the other channel are not hot-mounted by it. */
+  readonly channel?: 'profile' | 'workspace'
+  /** Mount the installed bundle's patch rows (or package root fallback). */
   mount(entry: LedgerEntry): Promise<RuntimeMountResult>
   /** Dispose the live fiber (or all fibers of the module) before inverse replay. */
   unmount(entry: LedgerEntry): Promise<RuntimeMountResult>
+  /** Disable or re-enable the live rows without uninstalling anything. */
+  setDisabled(entry: LedgerEntry, disabled: boolean): Promise<RuntimeMountResult>
 }
 
 export interface RuntimeMountResult {

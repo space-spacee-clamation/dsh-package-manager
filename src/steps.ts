@@ -14,8 +14,9 @@ import {
   cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
 } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
+import { quoteShellArg } from './process.ts'
 import {
-  readAllowBuilds, readManifest, readWorkspace, reconcileBundles, writeAllowBuilds, writeManifest,
+  readAllowBuilds, readManifest, readWorkspace, reconcileBundles, removeDanglingLink, writeAllowBuilds, writeManifest,
 } from './profile.ts'
 import type { AdapterContext, SpawnResult, StepRecord, StepSpec } from './types.ts'
 
@@ -23,6 +24,9 @@ import type { AdapterContext, SpawnResult, StepRecord, StepSpec } from './types.
 export type PnpmRunner = (args: string[], cwd: string, env: Record<string, string>) => Promise<SpawnResult>
 
 export type CommandRunner = (command: string, cwd: string, env: Record<string, string>) => Promise<SpawnResult>
+
+/** `dsh plugin` invocation seam: the harness's existing profile add/remove tool. */
+export type DshRunner = (args: string[], cwd: string, env: Record<string, string>) => Promise<SpawnResult>
 
 export function defaultPnpmRunner(): PnpmRunner {
   return async (args, cwd, env) => spawnResult('pnpm', args, cwd, env)
@@ -45,11 +49,16 @@ export function defaultCommandRunner(): CommandRunner {
 }
 
 function spawnResult(command: string, args: string[], cwd: string, env: Record<string, string>): SpawnResult {
-  const result = spawnSync(command, args, {
+  const shell = process.platform === 'win32'
+  const argv = [...args]
+  const commandText = shell && argv.length > 0
+    ? [command, ...argv].map(quoteShellArg).join(' ')
+    : command
+  const result = spawnSync(commandText, shell ? [] : argv, {
     cwd,
     env: { ...process.env, ...env },
     encoding: 'utf8',
-    shell: process.platform === 'win32',
+    shell,
     windowsHide: true,
   })
   const status = result.status ?? 1
@@ -69,6 +78,7 @@ export const STEP_KINDS = new Set([
   'profile.dependency.remove',
   'profile.bundles.add',
   'profile.bundles.remove',
+  'profile.bundles.removeMany',
   'profile.bundles.reconcile',
   'profile.bundles.set',
   'profile.allowBuild.add',
@@ -109,8 +119,8 @@ export function validateStepSpec(spec: StepSpec, where: string): void {
   if (typeof spec.uses !== 'string' || !STEP_KINDS.has(spec.uses)) {
     throw new Error(`${where}: unsupported step kind ${JSON.stringify(spec.uses)}`)
   }
-  if (spec.uses === 'profile.allowBuild.set' || spec.uses === 'profile.bundles.set') {
-    const packages = spec.uses === 'profile.allowBuild.set' ? spec.packages : spec.bundles
+  if (spec.uses === 'profile.allowBuild.set' || spec.uses === 'profile.bundles.set' || spec.uses === 'profile.bundles.removeMany') {
+    const packages = spec.uses === 'profile.allowBuild.set' ? spec.packages : spec.uses === 'profile.bundles.set' ? spec.bundles : spec.packages
     if (!Array.isArray(packages) || packages.some(packageName => typeof packageName !== 'string')) {
       throw new Error(`${where}: ${spec.uses} needs a string array (${spec.uses === 'profile.allowBuild.set' ? 'packages' : 'bundles'})`)
     }
@@ -128,6 +138,9 @@ export function validateStepSpec(spec: StepSpec, where: string): void {
   }
   for (const field of STRING_FIELDS[spec.uses] ?? []) {
     if (typeof spec[field] !== 'string') throw new Error(`${where}: ${spec.uses} needs string field ${JSON.stringify(field)}`)
+  }
+  if (spec.uses === 'file.copy' && spec.exclude !== undefined && (!Array.isArray(spec.exclude) || spec.exclude.some(item => typeof item !== 'string'))) {
+    throw new Error(`${where}: file.copy.exclude must be a string array`)
   }
   if (spec.uses === 'command' || spec.uses === 'check') {
     const env = spec.env
@@ -147,6 +160,7 @@ export class StepExecutor {
   constructor(
     private readonly pnpm: PnpmRunner = defaultPnpmRunner(),
     private readonly command: CommandRunner = defaultCommandRunner(),
+    private readonly dsh?: DshRunner,
   ) {}
 
   async run(specs: readonly StepSpec[], ctx: AdapterContext, backupRoot: string): Promise<StepRecord[]> {
@@ -189,20 +203,42 @@ export class StepExecutor {
       case 'profile.dependency.add': {
         const specText = String(spec.spec)
         const before = readManifest(ctx.profileDir).dependencies ?? {}
-        await this.runPnpm(['add', specText], ctx.profileDir, ctx)
+        const tool = await this.runProfileDependency(['add', specText], ctx)
         const after = readManifest(ctx.profileDir).dependencies ?? {}
-        const packageName = addedDependency(before, after)
-        if (packageName === undefined) throw new Error(`pnpm add ${JSON.stringify(specText)} reported success but wrote no dependency`)
-        const label = `pnpm add ${specText} (${packageName})`
-        return { ...base, label, params: { spec: specText, packageName }, inverse: { uses: 'profile.dependency.remove', packageName } }
+        const added = addedDependency(before, after)
+        const expected = typeof spec.packageName === 'string' ? spec.packageName : ''
+        let packageName = added
+        if (packageName === undefined && expected !== '' && normalizedLinkSpec(after[expected]) === normalizedLinkSpec(specText)) {
+          // A previous interrupted install can leave the dependency behind
+          // without a ledger record. Treat that exact dependency as this
+          // step's own result so the next attempt can converge and the
+          // recorded inverse can remove it on uninstall.
+          packageName = expected
+        }
+        if (packageName === undefined) throw new Error(`${tool} add ${JSON.stringify(specText)} reported success but wrote no dependency`)
+        const label = `${tool} add ${specText} (${packageName})`
+        const resolvedSpec = after[packageName]
+        return {
+          ...base,
+          label,
+          params: {
+            spec: specText,
+            packageName,
+            ...(resolvedSpec === undefined ? {} : { resolvedSpec }),
+          },
+          inverse: { uses: 'profile.dependency.remove', packageName },
+        }
       }
 
       case 'profile.dependency.remove': {
         const packageName = String(spec.packageName)
         const before = readManifest(ctx.profileDir).dependencies ?? {}
         const previousSpec = before[packageName]
-        await this.runPnpm(['remove', packageName], ctx.profileDir, ctx)
-        const label = `pnpm remove ${packageName}`
+        const tool = await this.runProfileDependency(['remove', packageName], ctx)
+        if (removeDanglingLink(ctx.profileDir, packageName)) {
+          ctx.log('warn', `removed dangling node_modules link for ${packageName} (its link target no longer exists)`)
+        }
+        const label = `${tool} remove ${packageName}`
         return {
           ...base,
           label,
@@ -230,6 +266,21 @@ export class StepExecutor {
         }
       }
 
+      case 'profile.bundles.removeMany': {
+        const packages = (spec.packages as string[]).map(packageName => String(packageName))
+        const manifest = readManifest(ctx.profileDir)
+        const before = [...(manifest.dsh?.profile?.bundles ?? [])]
+        const removed = new Set(packages)
+        manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: before.filter(name => !removed.has(name)) } }
+        writeManifest(ctx.profileDir, manifest)
+        return {
+          ...base,
+          label: `bundles -= [${packages.join(', ')}]`,
+          params: { packages },
+          inverse: { uses: 'noop' },
+        }
+      }
+
       case 'profile.bundles.remove': {
         const packageName = String(spec.package)
         const manifest = readManifest(ctx.profileDir)
@@ -249,13 +300,22 @@ export class StepExecutor {
       }
 
       case 'profile.bundles.reconcile': {
-        const before = [...(readManifest(ctx.profileDir).dsh?.profile?.bundles ?? [])]
         const result = reconcileBundles(ctx.profileDir)
+        const expected = typeof spec.packageName === 'string' && spec.packageName !== '' ? spec.packageName : undefined
+        const ownAdded = expected !== undefined && result.added.includes(expected)
         return {
           ...base,
           label: result.changed ? `bundles reconciled (+${result.added.join(',')})` : 'bundles reconciled (no change)',
           params: { added: result.added },
-          inverse: { uses: 'profile.bundles.set', bundles: before },
+          // Remove exactly the row this install added; never restore a whole
+          // list snapshot, which would clobber bundle rows the host or the
+          // user added after this install (the host reconciles bundles itself
+          // on its own path, so its rows must stay untouched).
+          inverse: ownAdded
+            ? { uses: 'profile.bundles.remove', package: expected }
+            : result.added.length > 0
+              ? { uses: 'profile.bundles.removeMany', packages: result.added }
+              : { uses: 'noop' },
         }
       }
 
@@ -374,11 +434,14 @@ export class StepExecutor {
         if (directory) {
           // Recursive copy: the isolated `.venv` install moves a whole source
           // tree in one step. `.git` is deliberately not copied — the ledger
-          // already records the resolved commit.
+          // already records the resolved commit. `exclude` lets adapters drop
+          // files like pnpm-lock.yaml whose in-tree presence changes pnpm's
+          // treatment of a `file:` dependency.
+          const exclude = new Set(['.git', 'node_modules', ...(Array.isArray(spec.exclude) ? spec.exclude.map(item => String(item)) : [])])
           cpSync(from, to, {
             recursive: true,
             force: true,
-            filter: candidate => basename(candidate) !== '.git' && basename(candidate) !== 'node_modules',
+            filter: candidate => !exclude.has(basename(candidate)),
           })
         } else {
           cpSync(from, to)
@@ -463,6 +526,80 @@ export class StepExecutor {
     }
   }
 
+  /**
+   * Apply one profile dependency edit with the harness's existing
+   * `dsh plugin add/remove` tool whenever it is available. Standalone `dpm`
+   * runs (no `dsh` on PATH) fall back to raw pnpm so the CLI and unit tests
+   * keep working outside a DSH installation.
+   * @returns the label of the tool that actually performed the edit.
+   */
+  private async runProfileDependency(args: ['add' | 'remove', string], ctx: AdapterContext): Promise<string> {
+    if (this.dsh === undefined) {
+      await this.runPnpm(args, ctx.profileDir, ctx)
+      return 'pnpm'
+    }
+    const profile = basename(ctx.profileDir)
+    try {
+      const result = await this.dsh(
+        ['plugin', '--profile', profile, ...args],
+        ctx.profileDir,
+        { PM_PROFILE: ctx.profileDir, PM_HOME: ctx.home, DSH_HOME: ctx.home },
+      )
+      const dshLabel = `dsh plugin --profile ${profile} ${args.join(' ')}`
+      if (result.exitCode !== 0) {
+        const diagnostics = tail(result.stderr || result.stdout)
+        if (!isMissingDshResult(result, diagnostics)) {
+          throw new Error(`${dshLabel} failed (exit ${result.exitCode}): ${diagnostics}`)
+        }
+        ctx.log('warn', `dsh plugin is unavailable (${diagnostics || `exit ${result.exitCode}`}); falling back to pnpm for this profile edit`)
+        await this.runPnpm(args, ctx.profileDir, ctx)
+        return 'pnpm'
+      }
+      ctx.log('info', `${dshLabel} (${ctx.profileDir})`)
+      return 'dsh plugin'
+    } catch (error) {
+      if (!isDshMissingError(error)) throw error
+      ctx.log('warn', `dsh plugin is unavailable (${messageOf(error)}); falling back to pnpm for this profile edit`)
+      await this.runPnpm(args, ctx.profileDir, ctx)
+      return 'pnpm'
+    }
+  }
+    /** Batch profile dependency edit; one dsh/pnpm invocation for many packages. */
+    async runProfileDependencies(action: 'add' | 'remove', specs: string[], ctx: AdapterContext): Promise<string> {
+      if (specs.length === 0) return 'noop'
+      if (specs.length === 1) return this.runProfileDependency([action, specs[0]!], ctx)
+      const args = [action, ...specs] as ['add' | 'remove', ...string[]]
+      if (this.dsh === undefined) {
+        await this.runPnpm(args, ctx.profileDir, ctx)
+        return 'pnpm'
+      }
+      const profile = basename(ctx.profileDir)
+      try {
+        const result = await this.dsh(
+          ['plugin', '--profile', profile, ...args],
+          ctx.profileDir,
+          { PM_PROFILE: ctx.profileDir, PM_HOME: ctx.home, DSH_HOME: ctx.home },
+        )
+        const dshLabel = `dsh plugin --profile ${profile} ${args.join(' ')}`
+        if (result.exitCode !== 0) {
+          const diagnostics = tail(result.stderr || result.stdout)
+          if (!isMissingDshResult(result, diagnostics)) {
+            throw new Error(`${dshLabel} failed (exit ${result.exitCode}): ${diagnostics}`)
+          }
+          ctx.log('warn', `dsh plugin is unavailable (${diagnostics || `exit ${result.exitCode}`}); falling back to pnpm for this profile edit`)
+          await this.runPnpm(args, ctx.profileDir, ctx)
+          return 'pnpm'
+        }
+        ctx.log('info', `${dshLabel} (${ctx.profileDir})`)
+        return 'dsh plugin'
+      } catch (error) {
+        if (!isDshMissingError(error)) throw error
+        ctx.log('warn', `dsh plugin is unavailable (${messageOf(error)}); falling back to pnpm for this profile edit`)
+        await this.runPnpm(args, ctx.profileDir, ctx)
+        return 'pnpm'
+      }
+    }
+
   private async runPnpm(args: string[], cwd: string, ctx: AdapterContext): Promise<void> {
     const result = await this.pnpm(args, cwd, { PM_PROFILE: ctx.profileDir, PM_HOME: ctx.home })
     if (result.exitCode !== 0) {
@@ -477,6 +614,21 @@ export class StepExecutor {
       throw new Error(`command failed (exit ${result.exitCode}): ${run}\n${tail(result.stderr || result.stdout)}`)
     }
   }
+
+  /**
+   * Reconcile a profile's pnpm tree with its manifest (`pnpm install`).
+   * This removes orphaned store links left behind by previous `link:` or
+   * interrupted installs; stale links otherwise poison later adds (pnpm
+   * import EPERM when the link target is gone or points into scratch space).
+   */
+  async reconcileProfile(ctx: AdapterContext): Promise<void> {
+    await this.runPnpm(['install'], ctx.profileDir, ctx)
+  }
+}
+
+/** Compare pnpm-written dependency specs regardless of Windows path separators. */
+function normalizedLinkSpec(value: string | undefined): string {
+  return (value ?? '').replaceAll('\\', '/')
 }
 
 /** Find the dependency key a pnpm add created or changed. */
@@ -535,6 +687,15 @@ function envOf(spec: StepSpec): Record<string, string> {
 function tail(text: string): string {
   const lines = text.trim().split(/\r?\n/)
   return lines.slice(-12).join('\n')
+}
+
+function isMissingDshResult(result: SpawnResult, diagnostics: string): boolean {
+  return result.exitCode === 127
+    || /not recognized as an internal or external command|不是内部或外部命令|command not found|no such file or directory/i.test(diagnostics)
+}
+
+function isDshMissingError(error: unknown): boolean {
+  return /dsh not found on PATH|ENOENT/i.test(messageOf(error))
 }
 
 function messageOf(error: unknown): string {

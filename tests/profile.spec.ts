@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  ensureProfile, readAllowBuilds, readManifest, readWorkspace, reconcileBundles, writeAllowBuilds,
+  ensureProfile, healProfiles, readAllowBuilds, readManifest, readWorkspace, reconcileBundles, writeAllowBuilds,
 } from '../src/profile.ts'
 
 const roots: string[] = []
@@ -75,5 +75,37 @@ describe('allowBuilds', () => {
     writeAllowBuilds(dir, ['a', 'b'])
     expect(readAllowBuilds(dir)).toEqual(['a', 'b'])
     expect(readWorkspace(dir)?.allowBuilds).toEqual(['a', 'b'])
+  })
+})
+
+describe('healProfiles', () => {
+  it('prunes unresolvable bundle rows, keeps template and resolvable rows, and removes dangling links', () => {
+    const home = tempDir()
+    const dir = join(home, 'profiles', 'web')
+    ensureProfile(dir, 'web')
+    // resolvable bundle package
+    mkdirSync(join(dir, 'node_modules', 'resolvable-pkg'), { recursive: true })
+    writeFileSync(join(dir, 'node_modules', 'resolvable-pkg', 'package.json'), JSON.stringify({
+      name: 'resolvable-pkg',
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+    }))
+    // broken bundle row: no dependency and no resolvable package dir
+    const manifest = readManifest(dir)
+    manifest.dependencies = { 'resolvable-pkg': 'file:../resolvable-pkg' }
+    manifest.dsh = {
+      ...manifest.dsh,
+      profile: {
+        ...manifest.dsh?.profile,
+        bundles: [...(manifest.dsh?.profile?.bundles ?? []), 'resolvable-pkg', 'broken-pkg'],
+      },
+    }
+    writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest))
+
+    const report = healProfiles(home)
+    const healed = readManifest(dir).dsh?.profile?.bundles ?? []
+    expect(healed).not.toContain('broken-pkg')
+    expect(healed).toContain('@deepseek-ai/dsh-base')
+    expect(healed).toContain('resolvable-pkg')
+    expect(report.some(item => item.profile === 'web' && item.pruned.includes('broken-pkg'))).toBe(true)
   })
 })

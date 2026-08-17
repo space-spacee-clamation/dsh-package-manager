@@ -21,13 +21,13 @@ afterEach(() => {
 function fakeGit(calls: string[][]): GitRunner {
   return async (args, cwd): Promise<SpawnResult> => {
     calls.push(args)
-    if (args[0] === 'clone') {
+    if (args.includes('clone')) {
       const destination = args[args.length - 1]
       if (destination !== undefined) mkdirSync(destination, { recursive: true })
       return { exitCode: 0, stdout: '', stderr: '' }
     }
-    if (args[0] === 'rev-parse') return { exitCode: 0, stdout: 'abc123\n', stderr: '' }
-    if (args[0] === 'remote') return { exitCode: 0, stdout: '', stderr: '' }
+    if (args.includes('rev-parse')) return { exitCode: 0, stdout: 'abc123\n', stderr: '' }
+    if (args.includes('remote')) return { exitCode: 0, stdout: '', stderr: '' }
     throw new Error(`unexpected git command in cwd ${cwd}: ${args.join(' ')}`)
   }
 }
@@ -45,14 +45,16 @@ describe('centralized git package store', () => {
     expect(first.dir).toContain(join('work-1', 'source'))
     expect(second.dir).toContain(join('work-2', 'source'))
     expect(first.resolvedCommit).toBe('abc123')
-    expect(calls.filter(args => args[0] === 'clone' && args[1] === '--mirror')).toHaveLength(1)
+    const mirrorCalls = calls.filter(args => args.includes('clone') && args.includes('--bare'))
+    expect(mirrorCalls).toHaveLength(1)
 
-    const mirror = calls.find(args => args[0] === 'clone' && args[1] === '--mirror')?.[4]
+    const mirror = mirrorCalls[0]?.[mirrorCalls[0].length - 1]
     expect(mirror).toBeDefined()
     expect(existsSync(mirror ?? '')).toBe(true)
-    const localClones = calls.filter(args => args[0] === 'clone' && args[1] !== '--mirror')
+    const localClones = calls.filter(args => args.includes('clone') && !args.includes('--bare'))
     expect(localClones).toHaveLength(2)
-    expect(localClones[0]?.[4]).toBe(mirror)
-    expect(localClones[1]?.[4]).toBe(mirror)
+    expect(localClones[0]?.[localClones[0].length - 2]).toBe(mirror)
+    expect(localClones[1]?.[localClones[1].length - 2]).toBe(mirror)
+    expect(calls.filter(args => args.includes('fetch') || args.includes('remote'))).toHaveLength(0)
   })
 })

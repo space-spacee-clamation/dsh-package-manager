@@ -11,7 +11,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { PackageManagerService } from './index.ts'
 import type {
-  AdapterInitRequest, AiInstallRequest, InstallRequest, PackageManagerConfig, RestoreRequest, SyncRequest, ToggleRequest, UninstallRequest, WorkspaceHistoryRequest,
+  AdapterInitRequest, AiInstallRequest, InstallRequest, PackageManagerConfig, RestoreRequest, SyncRequest, ToggleRequest, UninstallRequest, WorkspaceHistoryRequest, WorkspaceSwitchRequest,
 } from './types.ts'
 
 export const name = 'package-manager-web'
@@ -73,6 +73,14 @@ function handle(service: PackageManagerService, apiPrefix: string): Handler {
         service.clearRestartMarker()
         return send(res, 200, { ok: true, value: null })
       }
+      if (req.method === 'POST' && path === '/web-refresh/clear') {
+        assertCsrf(req)
+        service.clearWebRefreshMarker()
+        return send(res, 200, { ok: true, value: null })
+      }
+      if (req.method === 'POST' && path === '/doctor') {
+        return dispatch(res, req, () => service.doctor())
+      }
       if (req.method === 'POST' && path === '/install') return dispatch(res, req, body => service.install(body as unknown as InstallRequest))
       if (req.method === 'POST' && path === '/uninstall') return dispatch(res, req, body => service.uninstall(body as unknown as UninstallRequest))
       if (req.method === 'POST' && path === '/disabled/remove') return dispatch(res, req, body => Promise.resolve(service.forgetDisabled(body as unknown as ToggleRequest)))
@@ -84,6 +92,12 @@ function handle(service: PackageManagerService, apiPrefix: string): Handler {
       }
       if (req.method === 'POST' && path === '/workspace-history/clear') {
         return dispatch(res, req, () => Promise.resolve(service.clearWorkspaceHistory()))
+      }
+      if (req.method === 'POST' && path === '/workspace/switch') {
+        return dispatch(res, req, body => {
+          const request = body as unknown as WorkspaceSwitchRequest
+          return service.switchWorkspace(request.path, request.dryRun === true)
+        })
       }
       if (req.method === 'POST' && path === '/restore') return dispatch(res, req, body => service.restore(body as unknown as RestoreRequest))
       if (req.method === 'POST' && path === '/sync') return dispatch(res, req, body => service.sync(body as unknown as SyncRequest))

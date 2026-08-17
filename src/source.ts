@@ -13,13 +13,19 @@ import { cpSync, existsSync, mkdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { cloneGitFromStore, snapshotFileSource } from './packageStore.ts'
 import { isAbsolutePath } from './paths.ts'
+import { quoteShellArg } from './process.ts'
 import type { SourceKind, SpawnResult } from './types.ts'
 
 export type GitRunner = (args: string[], cwd: string) => Promise<SpawnResult>
 
 export function defaultGitRunner(): GitRunner {
   return async (args, cwd) => {
-    const result = spawnSync('git', args, { cwd, encoding: 'utf8', shell: process.platform === 'win32', windowsHide: true })
+    const shell = process.platform === 'win32'
+    const argv = [...args]
+    const commandText = shell && argv.length > 0
+      ? ['git', ...argv].map(quoteShellArg).join(' ')
+      : 'git'
+    const result = spawnSync(commandText, shell ? [] : argv, { cwd, encoding: 'utf8', shell, windowsHide: true })
     const status = result.status ?? 1
     const error = result.error
     if (error !== undefined) {

@@ -6,7 +6,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { CordisRuntime } from '../src/runtime.ts'
+import { CordisRuntime } from '../src/cordisRuntime.ts'
 import type { LedgerEntry } from '../src/types.ts'
 
 const roots: string[] = []
@@ -34,7 +34,7 @@ function entry(packageName: string): LedgerEntry {
     materializedDir: '',
     resolvedCommit: '',
     steps: [],
-    spec: { source: packageName, adapter: 'dsh-bundle', adapterDir: '', ref: '' },
+    spec: { source: packageName, adapter: 'dsh-bundle', adapterDir: '', ref: '', allowBuild: false },
     installedAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),
   }
@@ -141,6 +141,51 @@ describe('CordisRuntime hot plug', () => {
     expect(events).toContain('native-dispose')
     expect([...ctx.loader.entries()].some(item => item.options.name.includes('native-fixture'))).toBe(false)
   })
+    it('mounts the bundle patch rows, not the bundle package root', async () => {
+      const profileDir = tempDir()
+      const bundleRoot = join(profileDir, 'node_modules', 'patch-bundle')
+      mkdirSync(bundleRoot, { recursive: true })
+      writeFileSync(join(bundleRoot, 'package.json'), JSON.stringify({
+        name: 'patch-bundle',
+        version: '1.0.0',
+        type: 'module',
+        dsh: { bundle: { patch: './cordis.patch.yml' } },
+      }))
+      const code = `
+        globalThis.__dshPatchRowEvents = []
+        export default {
+          name: 'patch-row',
+          apply(ctx, config) {
+            globalThis.__dshPatchRowEvents.push('apply:' + (config?.flag ?? 'none'))
+            ctx.effect(() => () => { globalThis.__dshPatchRowEvents.push('dispose') }, 'patch-row: effect')
+          },
+        }
+      `
+      writeFileSync(join(bundleRoot, 'cordis.patch.yml'), `
+- insert:
+    - id: patch-row
+      name: ${JSON.stringify(`data:text/javascript,${encodeURIComponent(code)}`)}
+      config:
+        flag: patched
+`)
+      const ctx = new Context()
+      ctx.baseUrl = pathToFileURL(profileDir).href + '/'
+      await ctx.plugin(Loader)
+      const target = entry('patch-bundle')
+      target.profileDir = profileDir
+      const runtime = new CordisRuntime(ctx)
+
+      const mounted = await runtime.mount(target)
+      expect(mounted.mounted).toBe(true)
+      expect([...ctx.loader.entries()].some(item => item.options.id === 'patch-row')).toBe(true)
+      expect(((globalThis as Record<string, unknown>).__dshPatchRowEvents as string[])).toContain('apply:patched')
+
+      const unmounted = await runtime.unmount(target)
+      expect(unmounted.mounted).toBe(true)
+      expect([...ctx.loader.entries()].some(item => item.options.id === 'patch-row')).toBe(false)
+      expect(((globalThis as Record<string, unknown>).__dshPatchRowEvents as string[])).toContain('dispose')
+    })
+
 
   it('refuses non-bundle entries', async () => {
     const ctx = new Context()

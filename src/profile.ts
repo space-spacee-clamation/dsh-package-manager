@@ -7,7 +7,7 @@
  */
 
 import { createRequire } from 'node:module'
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import YAML from 'yaml'
 import { profileDir } from './paths.ts'
@@ -167,6 +167,24 @@ export function reconcileBundles(dir: string): BundleReconcileResult {
   }
   return { added, removed: [], changed }
 }
+  /** Remove dependency-managed bundle rows after a batch dependency removal. */
+  export function pruneBundles(dir: string, removedPackageNames: readonly string[]): string[] {
+    const manifest = readManifest(dir)
+    const dependencies = new Set(Object.keys(manifest.dependencies ?? {}))
+    const removed = new Set(removedPackageNames)
+    const bundles = [...(manifest.dsh?.profile?.bundles ?? [])]
+    const pruned: string[] = []
+    const next = bundles.filter(packageName => {
+      if (!removed.has(packageName) || dependencies.has(packageName)) return true
+      pruned.push(packageName)
+      return false
+    })
+    if (pruned.length > 0) {
+      manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: next } }
+      writeManifest(dir, manifest)
+    }
+    return pruned
+  }
 
 /**
  * Current allowBuilds as package/selector names. pnpm accepts both the
@@ -196,6 +214,73 @@ export function writeAllowBuilds(dir: string, packages: string[]): void {
     workspace.allowBuilds = next
   }
   writeWorkspace(dir, workspace)
+}
+
+/**
+ * Remove a profile node_modules entry for one package when it is a dangling
+ * link (for example a `link:` dependency whose .venv target was deleted).
+ * pnpm normally removes these with the dependency, but an interrupted or
+ * manifest-only removal can strand one; a dangling bundle link poisons the
+ * next boot's bundle resolution.
+ */
+export function removeDanglingLink(profileDir: string, packageName: string): boolean {
+  const path = join(profileDir, 'node_modules', packageName)
+  let stat
+  try {
+    stat = lstatSync(path)
+  } catch {
+    return false
+  }
+  if (!stat.isSymbolicLink()) return false
+  if (existsSync(path)) return false
+  rmSync(path, { recursive: true, force: true })
+  return true
+}
+
+/** One pruned bundle row, reported by {@link healProfiles}. */
+export interface HealReport {
+  profile: string
+  pruned: string[]
+  removedLinks: string[]
+}
+
+/**
+ * Repair a home's profiles so the next `dsh` boot cannot die on bundle
+ * resolution: a bundle row whose dependency is absent AND whose package does
+ * not resolve from the profile (the `$DSH_HOME/profiles/node_modules` fallback
+ * farm keeps in-box bundles resolvable) is pruned, and dangling node_modules
+ * links for those names are removed. Template bundle rows are never pruned.
+ */
+export function healProfiles(
+  home: string,
+  log: (level: 'info' | 'warn', message: string) => void = () => {},
+): HealReport[] {
+  const reports: HealReport[] = []
+  for (const name of listProfiles(home)) {
+    const dir = profileDir(home, name)
+    const manifest = readManifest(dir)
+    const dependencies = manifest.dependencies ?? {}
+    const bundles = [...(manifest.dsh?.profile?.bundles ?? [])]
+    const template = new Set(PROFILE_TEMPLATES[name] ?? DEFAULT_PROFILE_BUNDLES)
+    const pruned: string[] = []
+    const removedLinks: string[] = []
+    const next = bundles.filter((packageName) => {
+      if (template.has(packageName) || dependencies[packageName] !== undefined) return true
+      if (resolvePackageDir(dir, packageName) !== undefined) return true
+      pruned.push(packageName)
+      if (removeDanglingLink(dir, packageName)) removedLinks.push(packageName)
+      return false
+    })
+    if (pruned.length > 0) {
+      manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: next } }
+      writeManifest(dir, manifest)
+      for (const packageName of pruned) {
+        log('warn', `pruned unresolvable bundle row ${packageName} from profile ${name} (dependency is gone and the package does not resolve)`)
+      }
+    }
+    reports.push({ profile: name, pruned, removedLinks })
+  }
+  return reports
 }
 
 /** All profiles present under a home (directories with a package.json). */

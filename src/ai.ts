@@ -92,6 +92,10 @@ function buildPrompt(profile: string, id: string, source: string, workspaceDir: 
     `目标 profile：${profile}`,
     `工作区：${workspaceDir}`,
     '',
+    '约束：产出的插件包必须遵守宿主 harness 的包规范（docs/cookbook/adding-a-package.zh.md）：',
+    'ESM（type: module）、入口与 exports 指向已构建的 lib/ 产物、内部依赖不得使用 workspace: 协议',
+    '（只发布 registry 版或自包含构建）、带 UI 的插件需声明 dsh.client 并构建 lib/client.js。',
+    '',
     '安装步骤：',
     '1. 调用 `pm_install` 工具执行安装（无需参数，来源从工作区 manifest 读取）。该工具由当前进程内的包管理器执行，',
     '   dsh-bundle 插件安装完成后会立即通过 Cordis 热挂载，不需要重启。',
@@ -100,7 +104,7 @@ function buildPrompt(profile: string, id: string, source: string, workspaceDir: 
     '   b. 阅读本目录 `requirements/adapters/<id>/adapter.yaml`，补全 install/uninstall/verify 步骤；',
     '      每一个 install 步骤都必须有显式逆操作（包管理器按 LIFO 回放，卸载不依赖单独脚本）；',
     '   c. 再次调用 `pm_install`，并传入该 adapter 目录。',
-    '3. 依赖只允许安装在 `' + join(workspaceDir, '.venv') + '` 内，禁止直接修改全局 profile。',
+    '3. dsh-bundle 由包管理器直接安装为 profile 依赖并热挂载；custom adapter 的依赖只允许安装在 `' + join(workspaceDir, '.venv') + '` 内，禁止直接修改全局 profile。',
     '4. 完成后报告：安装方式（内置/custom adapter）、是否已热挂载、以及用户如何验证。',
   ].join('\n')
 }
@@ -115,6 +119,9 @@ function writeAgentsFile(workspaceDir: string, profile: string, id: string, sour
     '',
     '优先调用 `pm_install` 工具；需要自定义 adapter 时调用 `pm_scaffold`，',
     '补全 adapter 后再次调用 `pm_install`。依赖统一放在 `.venv/` 中。',
+    '',
+    '包规范：ESM（type: module）、入口指向已构建产物、不用 workspace: 协议、',
+    '带 UI 的插件需声明 dsh.client 并构建 lib/client.js（见宿主 docs/cookbook/adding-a-package.zh.md）。',
     '',
   ].join('\n')
   writeFileSync(join(workspaceDir, AGENTS_FILE), text)
