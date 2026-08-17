@@ -281,7 +281,9 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
   const defaultRoot = state?.workspaceDefault ?? ''
   const historyPaths = (state?.workspaceHistory ?? []).filter(path => path !== currentRoot && path !== defaultRoot)
   const historyCount = (state?.workspaceHistory ?? []).length
-  const enabledEntries = state?.entries ?? []
+  const installedEntries = state?.entries ?? []
+  const enabledEntries = installedEntries.filter(entry => entry.disabled !== true)
+  const switchedOffEntries = installedEntries.filter(entry => entry.disabled === true)
   const disabledEntries = state?.disabled ?? []
 
   const resultPanel = (result !== null || logs.length > 0) ? (
@@ -446,15 +448,15 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
                         </div>
                       </div>
                       <div style={styles.pluginActions}>
-                        <label style={styles.switch} title={t('disable')}>
-                          <input
-                            type="checkbox"
-                            checked
-                            disabled={busy}
-                            onChange={() => void run(() => api<UninstallResult>('/disable', { profile: entry.profile, id: entry.id }))}
-                          />
+                        <button
+                          type="button"
+                          style={styles.toggleOn}
+                          title={t('disable')}
+                          disabled={busy}
+                          onClick={() => void run(() => api<UninstallResult>('/disable', { profile: entry.profile, id: entry.id }))}
+                        >
                           {t('on')}
-                        </label>
+                        </button>
                         <button
                           type="button"
                           style={{ ...styles.button, ...(confirmDelete === key ? styles.dangerArmed : styles.danger) }}
@@ -469,6 +471,60 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
                 })}
               </div>
             </div>
+
+            {switchedOffEntries.length > 0 && (
+              <div style={styles.card}>
+                <div style={styles.titleRow}>
+                  <div style={styles.sectionTitle}>
+                    <h3 style={styles.title}>{t('switchedOffTitle')}</h3>
+                    <span style={styles.badge}>{switchedOffEntries.length}</span>
+                  </div>
+                  <span style={styles.intro}>{t('switchedOffHint')}</span>
+                </div>
+                <div style={styles.list}>
+                  {switchedOffEntries.map(entry => {
+                    const key = deleteKey({ kind: 'installed', profile: entry.profile, id: entry.id })
+                    return (
+                      <div key={`${entry.profile}/${entry.id}`} style={{ ...styles.pluginCard, ...styles.disabledCard }}>
+                        <div style={styles.pluginName}>
+                          <strong><span style={{ ...styles.statusDot, background: '#b9b9b9' }} /> {entry.id}</strong>
+                          <span style={entry.adapter === 'dsh-bundle' ? styles.hotBadge : styles.badge}>
+                            {entry.adapter === 'dsh-bundle' ? t('hotBadge') : t('customBadge')}
+                          </span>
+                        </div>
+                        <div style={styles.pluginDesc}>
+                          <p style={styles.pluginSource}><span style={styles.label}>{t('pluginSummary')}: </span>{sourceSummary(entry.source, entry.ref)}</p>
+                          <div style={styles.meta}>
+                            <span style={styles.badge}>{entry.profile}</span>
+                            {entry.packageName !== '' && <span style={styles.mono}>{entry.packageName}</span>}
+                            {entry.adapter === 'dsh-bundle' && <span style={styles.hotBadge}>{t('patchBlock')}</span>}
+                          </div>
+                        </div>
+                        <div style={styles.pluginActions}>
+                          <button
+                            type="button"
+                            style={styles.toggleOff}
+                            title={t('enable')}
+                            disabled={busy}
+                            onClick={() => void run(() => api<InstallResult>('/enable', { profile: entry.profile, id: entry.id }))}
+                          >
+                            {t('off')}
+                          </button>
+                          <button
+                            type="button"
+                            style={{ ...styles.button, ...(confirmDelete === key ? styles.dangerArmed : styles.danger) }}
+                            disabled={busy}
+                            onClick={() => requestDelete({ kind: 'installed', profile: entry.profile, id: entry.id })}
+                          >
+                            {confirmDelete === key ? t('deleteConfirm') : t('uninstall')}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             <div style={styles.card}>
               <div style={styles.titleRow}>
@@ -498,15 +554,15 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
                         </div>
                       </div>
                       <div style={styles.pluginActions}>
-                        <label style={styles.switch} title={t('enable')}>
-                          <input
-                            type="checkbox"
-                            checked={false}
-                            disabled={busy}
-                            onChange={() => void run(() => api<InstallResult>('/enable', { profile: item.profile, id: item.id }))}
-                          />
+                        <button
+                          type="button"
+                          style={styles.toggleOff}
+                          title={t('enable')}
+                          disabled={busy}
+                          onClick={() => void run(() => api<InstallResult>('/enable', { profile: item.profile, id: item.id }))}
+                        >
                           {t('off')}
-                        </label>
+                        </button>
                         <button
                           type="button"
                           style={{ ...styles.button, ...(confirmDelete === key ? styles.dangerArmed : styles.danger) }}

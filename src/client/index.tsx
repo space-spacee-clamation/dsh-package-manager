@@ -11,6 +11,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { en, zh, type LocaleKey } from './locales.ts'
 import { PackageManagerTab } from './PackageManagerTab.tsx'
+import { SidebarPackageManagerButton } from './SidebarPackageManagerButton.tsx'
 
 export const name = 'dsh-package-manager'
 
@@ -20,6 +21,10 @@ export const inject = ['slots', 'locale']
 const NS = 'settings.packageManager'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    /** Actions beside Settings at the sidebar foot. */
+    'sidebar.footer.action': { kind: 'list'; scope: 'root'; owner: { wide: boolean } }
+  }
   interface LocaleNamespaceMap {
     /** Package manager settings tab copy. */
     'settings.packageManager': LocaleKey
@@ -37,7 +42,7 @@ export function apply(ctx: ClientContext): void {
   const t = ctx.locale.bind(NS)
   const injectT = (): { t: (key: keyof typeof zh) => string } => ({ t: ctx.locale.bind(NS) })
 
-  // Keep the Plugins-section tab for discoverability…
+  // Keep the Plugins-section tab for discoverability.
   ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
     name: 'settings.plugins.tab',
     id: 'package-manager',
@@ -47,14 +52,14 @@ export function apply(ctx: ClientContext): void {
     inject: injectT,
   }, PackageManagerTab))
 
-  // …and add an extra first-class menu in the settings list. The shell
-  // passes `close` for sections; PackageManagerTab deliberately ignores it.
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
+  // Main-menu entry beside Settings: a large package-manager panel opens
+  // from the sidebar footer action seat.
+  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
+    name: 'sidebar.footer.action',
     id: 'package-manager',
-    order: 40,
-    label: () => t('section'),
+    order: 0,
+    label: () => t('sidebarLabel'),
     locale: NS,
     inject: injectT,
-  }, PackageManagerTab))
+  }, SidebarPackageManagerButton))
 }
