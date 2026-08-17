@@ -88,6 +88,7 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
 
   // Workspace-page AI install input.
   const [source, setSource] = useState('')
+  const [localSearch, setLocalSearch] = useState('')
 
   // Page-2 drafts.
   const [workspaceRoot, setWorkspaceRoot] = useState('')
@@ -283,6 +284,10 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
   const historyCount = (state?.workspaceHistory ?? []).length
   const installedEntries = state?.entries ?? []
   const localPlugins = state?.localPlugins ?? []
+  const localQuery = localSearch.trim().toLowerCase()
+  const visibleLocalPlugins = localQuery === ''
+    ? localPlugins
+    : localPlugins.filter(item => item.name.toLowerCase().includes(localQuery))
 
   const clearOutput = (): void => {
     setLogs([])
@@ -484,24 +489,35 @@ export function PackageManagerTab({ t }: PackageManagerTabProps): ReactElement {
                   <h3 style={styles.title}>{t('localPluginsTitle')}</h3>
                   <span style={styles.badge}>{localPlugins.length}</span>
                 </div>
-                <button
-                  type="button"
-                  style={styles.button}
-                  disabled={busy}
-                  onClick={() => void run(() => api<LocalPluginInfo[]>('/local-plugins/refresh', {}))}
-                >
-                  {t('localPluginsRefresh')}
-                </button>
+                <div style={styles.row}>
+                  <input
+                    style={{ ...styles.input, width: 220 }}
+                    value={localSearch}
+                    onChange={event => setLocalSearch(event.target.value)}
+                    placeholder={t('localSearchPlaceholder')}
+                    disabled={busy}
+                  />
+                  <button
+                    type="button"
+                    style={styles.button}
+                    disabled={busy}
+                    onClick={() => void run(() => api<LocalPluginInfo[]>('/local-plugins/refresh', {}))}
+                  >
+                    {t('localPluginsRefresh')}
+                  </button>
+                </div>
               </div>
               <span style={styles.intro}>{t('localPluginsHint')}</span>
-              {localPlugins.length === 0 ? (
+              {visibleLocalPlugins.length === 0 ? (
                 <p style={styles.intro}>{t('localPluginsEmpty')}</p>
               ) : (
-                <div style={styles.list}>
-                  {localPlugins.map(item => (
+                <div style={styles.localGrid}>
+                  {visibleLocalPlugins.map(item => (
                     <div key={`${item.name}-${String(item.uid)}`} style={styles.localRow}>
-                      <span style={{ ...styles.statusDot, ...(item.active ? {} : { background: '#9aa0a8' }) }} />
-                      <span style={styles.localName}>{item.name}</span>
+                      <div style={styles.localTop}>
+                        <span style={{ ...styles.statusDot, ...(item.active ? {} : { background: '#9aa0a8' }) }} />
+                        <span style={styles.localName}>{item.name}</span>
+                      </div>
                       <span style={item.active ? styles.hotBadge : styles.badge}>{item.active ? t('on') : item.released ? t('localReleased') : t('localCached')}</span>
                       <button
                         type="button"

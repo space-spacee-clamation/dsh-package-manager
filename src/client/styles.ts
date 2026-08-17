@@ -114,12 +114,18 @@ export const styles: Record<string, CSSProperties> = {
     fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 12, padding: '4px 9px',
     border: `1px solid ${BORDER}`, borderRadius: 999, color: MUTED, overflowWrap: 'anywhere',
   },
+  localGrid: {
+    display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+    gap: 12, alignItems: 'stretch',
+  },
   localRow: {
-    display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-    padding: '10px 12px', border: `1px solid ${BORDER}`, borderRadius: 12,
+    display: 'flex', flexDirection: 'column', alignItems: 'stretch',
+    justifyContent: 'space-between', gap: 10, minHeight: 116,
+    padding: '12px 12px', border: `1px solid ${BORDER}`, borderRadius: 14,
     background: NEUTRAL_0,
   },
-  localName: { flex: '1 1 180px', minWidth: 140, fontWeight: 700 },
+  localTop: { display: 'flex', alignItems: 'flex-start', gap: 8, minWidth: 0 },
+  localName: { minWidth: 0, fontWeight: 750, fontSize: 13, overflowWrap: 'anywhere' },
   pluginGrid: {
     display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
     gap: 18, alignItems: 'stretch',
